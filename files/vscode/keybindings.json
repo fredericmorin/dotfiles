@@ -19,5 +19,35 @@
     "command": "editor.action.deleteLines",
     "when": "textInputFocus && !editorReadonly",
   },
+  {
+    "key": "shift+cmd+r",
+    "command": "-rerunSearchEditorSearch",
+    "when": "inSearchEditor",
+  },
+  {
+    "key": "shift+cmd+r",
+    "command": "workbench.action.replaceInFiles",
+  },
+  // navigation
+  {
+    "key": "shift+cmd+d",
+    "command": "-workbench.view.debug",
+    "when": "viewContainer.workbench.view.debug.enabled",
+  },
+  {
+    "key": "shift+cmd+d",
+    "command": "workbench.files.action.collapseExplorerFolders",
+  },
+  // console
+  {
+    "key": "cmd+j",
+    "command": "-workbench.action.togglePanel",
+    "when": "!isAuxiliaryWindowFocusedContext",
+  },
+  {
+    "key": "cmd+j",
+    "command": "workbench.action.terminal.toggleTerminal",
+    "when": "terminal.active",
+  },
   // other stuff
 ]

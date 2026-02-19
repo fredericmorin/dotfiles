@@ -3,6 +3,7 @@
   "files.insertFinalNewline": true,
 
   "explorer.confirmDelete": false,
+  "explorer.confirmDragAndDrop": false,
 
   "search.searchEditor.reusePriorSearchConfiguration": true,
   "search.showLineNumbers": true,
