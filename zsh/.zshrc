@@ -51,7 +51,7 @@ pwgen() {
 
 ## brew
 # load brew managed completion
-type brew >/dev/null && eval "$(brew shellenv)"
+[ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
