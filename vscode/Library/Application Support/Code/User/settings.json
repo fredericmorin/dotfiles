@@ -14,6 +14,12 @@
   "git.suggestSmartCommit": false,
   "git.openRepositoryInParentFolders": "never",
   "openInGitHub.useCommitSHAInURL": true,
+  "gitlens.codeLens.enabled": false,
+  "gitlens.hovers.enabled": false,
+  "gitlens.mode.active": "review",
+  "workbench.editorAssociations": {
+    "git-rebase-todo": "default",  // disable gitlens rebase popup
+  },
 
   "workbench.colorTheme": "Default Dark Modern",
   "editor.rulers": [80, 120],
