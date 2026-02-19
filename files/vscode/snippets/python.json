@@ -1,0 +1,20 @@
+{
+    "iPDB set trace": {
+        "prefix": "ipdb",
+        "body": [
+            "import ipdb; ipdb.set_trace()"
+        ]
+    },
+    "add TODO fred": {
+        "prefix": "todo",
+        "body": [
+            "# TODO(fred): "
+        ]
+    },
+    "add NOTE fred": {
+        "prefix": "note",
+        "body": [
+            "# NOTE(fred): "
+        ]
+    }
+}

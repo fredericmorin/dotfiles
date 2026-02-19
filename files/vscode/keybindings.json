@@ -1,0 +1,23 @@
+[
+  // sublime like...
+  {
+    "key": "cmd+e",
+    "command": "-actions.findWithSelection",
+  },
+  {
+    "key": "cmd+e",
+    "command": "editor.action.addSelectionToNextFindMatch",
+    "when": "editorFocus",
+  },
+  {
+    "key": "cmd+d",
+    "command": "-editor.action.addSelectionToNextFindMatch",
+    "when": "editorFocus",
+  },
+  {
+    "key": "cmd+d",
+    "command": "editor.action.deleteLines",
+    "when": "textInputFocus && !editorReadonly",
+  },
+  // other stuff
+]
