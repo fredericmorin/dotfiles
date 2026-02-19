@@ -48,9 +48,8 @@ pwgen() {
 }
 
 # brew managed completion
-eval "$(/opt/homebrew/bin/brew shellenv)"
-if type brew &>/dev/null; then
-    FPATH="$(brew --prefix)/share/zsh/site-functions:${FPATH}"
+if type brew >/dev/null; then
+    eval "$(brew shellenv)"
     autoload -Uz compinit
     compinit
 fi
@@ -65,8 +64,8 @@ export NVM_DIR="$HOME/.nvm"
 # dep: brew install pyenv
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
+type pyenv >/dev/null && eval "$(pyenv init -)"
 
 ## run .envrc file upon cd
 # dep: brew install direnv
-eval "$(direnv hook zsh)"
+type direnv >/dev/null && eval "$(direnv hook zsh)"
