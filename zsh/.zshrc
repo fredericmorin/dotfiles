@@ -1,3 +1,5 @@
+# echo "Loading $0"
+
 # colored terminal
 export CLICOLOR=1
 export TERM=xterm-color  # fix for some linux server
@@ -50,8 +52,6 @@ pwgen() {
 # brew managed completion
 if type brew >/dev/null; then
     eval "$(brew shellenv)"
-    autoload -Uz compinit
-    compinit
 fi
 
 ## nvm
@@ -69,3 +69,8 @@ type pyenv >/dev/null && eval "$(pyenv init -)"
 ## run .envrc file upon cd
 # dep: brew install direnv
 type direnv >/dev/null && eval "$(direnv hook zsh)"
+
+[ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
+
+autoload -Uz compinit
+compinit
