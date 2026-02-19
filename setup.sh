@@ -21,11 +21,14 @@ symlink_file_with_backup() {
 }
 
 log "~ dotfiles"
-symlink_file_with_backup ~/.zshrc files/.zshrc
-symlink_file_with_backup ~/.vimrc files/.vimrc
-symlink_file_with_backup ~/.gitconfig files/.gitconfig
+symlink_file_with_backup ~/.zshrc zsh/.zshrc
+symlink_file_with_backup ~/.vimrc vim/.vimrc
+symlink_file_with_backup ~/.gitconfig git/.gitconfig
 
 log vscode
-symlink_file_with_backup ~/Library/"Application Support"/Code/User/settings.json files/vscode/settings.json
-symlink_file_with_backup ~/Library/"Application Support"/Code/User/keybindings.json files/vscode/keybindings.json
-symlink_file_with_backup ~/Library/"Application Support"/Code/User/snippets/python.json files/vscode/snippets/python.json
+symlink_file_with_backup ~/Library/"Application Support"/Code/User/settings.json \
+			        vscode/Library/"Application Support"/Code/User/settings.json
+symlink_file_with_backup ~/Library/"Application Support"/Code/User/keybindings.json  \
+			        vscode/Library/"Application Support"/Code/User/keybindings.json
+symlink_file_with_backup ~/Library/"Application Support"/Code/User/snippets/python.json  \
+			        vscode/Library/"Application Support"/Code/User/wwsnippets/python.json
