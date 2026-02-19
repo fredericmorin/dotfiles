@@ -13,3 +13,7 @@ Run `./setup.sh` to replace/refresh config symlinks. Existing files will be save
 ## Inspiration
 
 - https://codeberg.org/EvanHahn/dotfiles
+
+## TODO
+
+- Use `GNU stow` to manage symlinks https://brandon.invergo.net/news/2012-05-26-using-gnu-stow-to-manage-your-dotfiles.html
