@@ -22,3 +22,4 @@ symlink_file_with_backup() {
 
 symlink_file_with_backup ~/.zshrc files/.zshrc
 symlink_file_with_backup ~/.vimrc files/.vimrc
+symlink_file_with_backup ~/.gitconfig files/.gitconfig

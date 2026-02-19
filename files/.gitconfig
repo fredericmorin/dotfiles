@@ -1,0 +1,83 @@
+[user]
+	name = Frederic Morin
+	email = frederic.morin.8@gmail.com
+
+[alias]
+    # branch management
+	br = branch -vv
+	bru = branch --unset-upstream
+	co = checkout
+	coom = checkout origin/master
+	coomb = checkout origin/master -b
+	reb = rebase -i
+	rebom = rebase -i origin/master
+	rebort = rebase --abort
+	resh = reset --hard
+	resom = reset origin/master
+	resomh = reset --hard origin/master
+	ls = ls-files
+	lsfd = !git ls-files | grep -i
+	dom = diff origin/master
+	doms = diff --stat origin/master
+    # commit
+	ci = commit
+	ciaa = commit -a --amend --no-edit
+	cim = "! f() { MSG=\"${@:-wip}\"; git add . && git commit -a -m \"$MSG\"; }; f"
+	cp = cherry-pick
+	st = status
+    # upstream
+	fop = fetch origin --prune --tags --recurse-submodules --jobs 6
+	foprebom = ! git fop && git rebom
+	fp = fetch origin --prune --tags
+	subup = submodule update --init --recursive
+	po = push origin
+	pou = ! (git branch --unset-upstream || true) 2>/dev/null && git push --set-upstream --force origin
+	pof = push origin --force-with-lease
+    # history
+	l = log --oneline
+	ll = log --oneline --graph --decorate
+	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --
+	lrom = rev-list --left-right --count origin/master
+
+[color]
+	ui = true
+	status = auto
+	branch = auto
+	diff = true
+[advice]
+	pushNonFastForward = false
+	statusHints = false
+[core]
+	editor = vim
+	whitespace = trailing-space,space-before-tab
+	# whitespace = fix,-indent-with-non-tab,trailing-space,cr-at-eol
+
+[init]
+	# defaultBranch = master
+
+[commit]
+	# gpgsign = true
+
+[merge]
+	# tool = opendiff
+
+[branch]
+	autosetuprebase = always
+	autosetupmerge = true
+
+[diff]
+	renames = copies
+	mnemonicprefix = true
+	colorMoved = zebra
+
+[push]
+	default = current
+
+[merge]
+	stat = true
+
+[fetch]
+	prune = true
+
+[pull]
+	rebase = true
