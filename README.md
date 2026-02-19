@@ -2,18 +2,22 @@
 
 My config files for zsh, git, vscode, etc.
 
+Use `stow` to manage symlink overlays in `$HOME` folder.
+
 Used on OSX daily.
 
-## Setup
+## Usage
 
-Run `./firstboot.sh` to install brew and minimum app suite
+To install
 
-Run `./setup.sh` to replace/refresh config symlinks. Existing files will be saved to the `backup` folder.
+```sh
+cd ~
+git clone git@github.com:fredericmorin/dotfiles.git
+cd ~/dotfiles
+make install
+```
 
 ## Inspiration
 
 - https://codeberg.org/EvanHahn/dotfiles
-
-## TODO
-
-- Use `GNU stow` to manage symlinks https://brandon.invergo.net/news/2012-05-26-using-gnu-stow-to-manage-your-dotfiles.html
+- https://brandon.invergo.net/news/2012-05-26-using-gnu-stow-to-manage-your-dotfiles.html

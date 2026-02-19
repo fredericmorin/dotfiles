@@ -19,3 +19,4 @@ run_trace brew install \
 	yq \
 	htop \
 	direnv \
+	stow \
