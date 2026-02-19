@@ -14,6 +14,7 @@ To install
 cd ~
 git clone git@github.com:fredericmorin/dotfiles.git
 cd ~/dotfiles
+make brew
 make install
 ```
 
