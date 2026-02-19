@@ -49,16 +49,9 @@ pwgen() {
   cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c $length && echo
 }
 
-# brew managed completion
-if type brew >/dev/null; then
-    eval "$(brew shellenv)"
-fi
-
-## nvm
-# dep: brew install nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"  # This loads nvm
-[ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
+## brew
+# load brew managed completion
+type brew >/dev/null && eval "$(brew shellenv)"
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
