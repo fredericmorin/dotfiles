@@ -50,7 +50,7 @@ pwgen() {
 }
 
 ## brew
-# load brew managed completion
+# load brew environment variables and completions
 [ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
 ## pyenv - manage installed python versions
