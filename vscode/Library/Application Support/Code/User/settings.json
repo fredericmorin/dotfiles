@@ -35,7 +35,7 @@
   "[python]": {
     "editor.formatOnType": true,
   },
-  "python.defaultInterpreterPath": "/opt/homebrew/bin/python3",
+  "python.defaultInterpreterPath": "python3",
   "python.createEnvironment.trigger": "off",
 
   "makefile.configureOnOpen": false,
