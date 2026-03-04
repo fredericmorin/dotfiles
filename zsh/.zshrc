@@ -66,7 +66,9 @@ grgd() {
 
   echo "$gone_branches" | xargs git branch -D
 }
-
+# uv tools install path. added first -> lowest priority
+# export path=("$HOME/.local/bin" $path)
+export PATH="$HOME/.local/bin:${PATH}"
 
 ## brew
 # load brew environment variables and completions
