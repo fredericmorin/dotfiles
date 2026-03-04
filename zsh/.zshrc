@@ -36,8 +36,7 @@ alias tailscale='/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 alias tss='tailscale status'
 alias gs='git st'
 alias gr='git br'
-alias grg='git br | grep gone'
-alias grd='git br -D'
+alias grg='git br -vv | grep gone'
 alias gg='git gui'
 alias gk='gitk --all'
 alias whatsup='watch -n 0.2 -x bash -c "pstree -p $$"'
@@ -48,6 +47,26 @@ pwgen() {
   local length=${1:-"14"}
   cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c $length && echo
 }
+grgd() {
+  gone_branches=$(git branch -vv | grep ': gone]' | awk '{print $1}')
+  if [[ -z "$gone_branches" ]]; then
+    echo "No branches to delete."
+    return
+  fi
+
+  echo "Branches to delete:"
+  echo "$gone_branches"
+  echo
+  read -r "confirm?Delete these branches? [Y/n] "
+
+  if [[ "$confirm" =~ ^[Nn]$ ]]; then
+    echo "Aborted."
+    return
+  fi
+
+  echo "$gone_branches" | xargs git branch -D
+}
+
 
 ## brew
 # load brew environment variables and completions
