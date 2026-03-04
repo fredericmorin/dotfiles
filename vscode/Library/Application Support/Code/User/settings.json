@@ -37,6 +37,7 @@
   },
   "python.defaultInterpreterPath": "python3",
   "python.createEnvironment.trigger": "off",
+  "python.analysis.typeCheckingMode": "standard",
 
   "makefile.configureOnOpen": false,
   "claudeCode.preferredLocation": "panel",
