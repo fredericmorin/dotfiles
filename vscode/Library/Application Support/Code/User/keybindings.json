@@ -70,5 +70,17 @@
     "key": "shift+cmd+-",
     "command": "workbench.action.decreaseViewSize",
   },
-  // other stuff
+  // toggle right side panel (claude/outline)
+  {
+    "key": "cmd+b",
+    "command": "workbench.action.toggleAuxiliaryBar"
+  },
+  {
+    "key": "alt+cmd+b",
+    "command": "-workbench.action.toggleAuxiliaryBar"
+  },
+  {
+    "key": "cmd+b",
+    "command": "-workbench.action.toggleSidebarVisibility"
+  },
 ]
