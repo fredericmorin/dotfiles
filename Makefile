@@ -17,11 +17,14 @@ install:
 	bash -c "$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
 
 # $(info add target $(shell VAR=$2; echo $${VAR:-/opt/homebrew/bin/$1}) for package $1)
+
+# create one make target per dependency using the app installation path as target dependency
 define BREW_PACKAGE_TARGET
 BREW_TARGETS += $(shell VAR=$2; echo $${VAR:-/opt/homebrew/bin/$1})
 $(shell VAR=$2; echo $${VAR:-/opt/homebrew/bin/$1}):
 	brew install $1
 endef
+
 $(eval $(call BREW_PACKAGE_TARGET,ripgrep,/opt/homebrew/bin/rg))
 $(eval $(call BREW_PACKAGE_TARGET,fd))
 $(eval $(call BREW_PACKAGE_TARGET,pstree))
