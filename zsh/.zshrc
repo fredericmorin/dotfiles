@@ -54,17 +54,6 @@ grgd() {
     echo "No branches to delete."
     return
   fi
-
-  echo "Branches to delete:"
-  echo "$gone_branches"
-  echo
-  read -r "confirm?Delete these branches? [Y/n] "
-
-  if [[ "$confirm" =~ ^[Nn]$ ]]; then
-    echo "Aborted."
-    return
-  fi
-
   echo "$gone_branches" | xargs git branch -D
 }
 # uv tools install path. added first -> lowest priority
