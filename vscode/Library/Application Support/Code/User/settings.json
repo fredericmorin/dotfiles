@@ -35,7 +35,6 @@
   "[python]": {
     "editor.formatOnType": true,
   },
-  "python.defaultInterpreterPath": "python3",
   "python.createEnvironment.trigger": "off",
   "python.analysis.typeCheckingMode": "standard",
 
