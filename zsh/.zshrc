@@ -3,6 +3,7 @@
 # colored terminal
 export CLICOLOR=1
 export TERM=xterm-color  # fix for some linux server
+tput init
 
 # enable history
 HISTFILE=~/.zsh_history

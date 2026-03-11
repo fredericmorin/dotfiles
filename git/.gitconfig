@@ -12,6 +12,7 @@
 	reb = rebase -i
 	rebom = rebase -i origin/master
 	rebort = rebase --abort
+	rebcon = rebase --continue
 	resh = reset --hard
 	resom = reset origin/master
 	resomh = reset --hard origin/master
