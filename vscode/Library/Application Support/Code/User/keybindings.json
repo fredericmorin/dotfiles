@@ -83,4 +83,14 @@
     "key": "cmd+b",
     "command": "-workbench.action.toggleSidebarVisibility"
   },
+  {
+    "key": "alt+cmd+e",
+    "command": "editor.action.selectHighlights",
+    "when": "editorFocus"
+  },
+  {
+    "key": "shift+cmd+l",
+    "command": "-editor.action.selectHighlights",
+    "when": "editorFocus"
+  },
 ]

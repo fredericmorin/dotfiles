@@ -5,6 +5,7 @@
 
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
+  "outline.collapseItems": "alwaysCollapse",
 
   "search.searchEditor.reusePriorSearchConfiguration": true,
   "search.showLineNumbers": true,
@@ -12,9 +13,10 @@
   "search.useGlobalIgnoreFiles": true,
   "search.useParentIgnoreFiles": true,
 
+  "openInGitHub.useCommitSHAInURL": true,
+  "git.useEditorAsCommitInput": false,
   "git.suggestSmartCommit": false,
   "git.openRepositoryInParentFolders": "never",
-  "openInGitHub.useCommitSHAInURL": true,
   "gitlens.codeLens.enabled": false,
   "gitlens.hovers.enabled": false,
   "gitlens.mode.active": "review",
@@ -26,7 +28,6 @@
   "editor.rulers": [80, 120],
   "terminal.integrated.scrollback": 10000,
   "terminal.integrated.persistentSessionScrollback": 1000,
-  "outline.collapseItems": "alwaysCollapse",
 
   "[jsonc]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
@@ -39,5 +40,10 @@
   "python.analysis.typeCheckingMode": "standard",
 
   "makefile.configureOnOpen": false,
-  "claudeCode.preferredLocation": "panel",
+
+  "chat.disableAIFeatures": true,
+  "claudeCode.preferredLocation": "sidebar",
+  "claudeCode.selectedModel": "opus",
+  "claudeCode.disableLoginPrompt": true,
+  "claudeCode.hideOnboarding": true
 }
