@@ -3,23 +3,26 @@
 	email = frederic.morin.8@gmail.com
 
 [alias]
+	# master or main?
+	defbranch = "!f() { test -n \"$1\" && r=\"$1\" || r=origin; \
+      basename \"$(git rev-parse --abbrev-ref \"$r\"/HEAD)\"; }; f"
     # branch management
 	br = branch -vv
 	bru = branch --unset-upstream
 	co = checkout
-	coom = checkout origin/master
-	coomb = checkout origin/master -b
+	coom = !git checkout "origin/$(git defbranch)"
+	coomb = !git checkout "origin/$(git defbranch)" -b
 	reb = rebase -i
-	rebom = rebase -i origin/master
+	rebom = !git rebase -i "origin/$(git defbranch)"
 	rebort = rebase --abort
 	rebcon = rebase --continue
 	resh = reset --hard
-	resom = reset origin/master
-	resomh = reset --hard origin/master
+	resom = !git reset "origin/$(git defbranch)"
+	resomh = !git reset --hard "origin/$(git defbranch)"
 	ls = ls-files
 	lsg = !git ls-files | grep -i
-	dom = diff origin/master
-	doms = diff --stat origin/master
+	dom = !git diff "origin/$(git defbranch)"
+	doms = !git diff --stat "origin/$(git defbranch)"
     # commit
 	ci = commit
 	ciaa = commit -a --amend --no-edit
@@ -38,7 +41,6 @@
 	l = log --oneline
 	ll = log --oneline --graph --decorate
 	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --
-	lrom = rev-list --left-right --count origin/master
 
 [color]
 	ui = true
