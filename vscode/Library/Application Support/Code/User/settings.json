@@ -45,5 +45,7 @@
   "claudeCode.preferredLocation": "sidebar",
   "claudeCode.selectedModel": "opus",
   "claudeCode.disableLoginPrompt": true,
-  "claudeCode.hideOnboarding": true
+  "claudeCode.hideOnboarding": true,
+  "claudeCode.useCtrlEnterToSend": true,
+  "docker.extension.enableComposeLanguageServer": false
 }
