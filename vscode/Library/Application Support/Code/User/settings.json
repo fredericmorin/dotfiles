@@ -2,6 +2,7 @@
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
+  "editor.formatOnSave": true,
 
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
@@ -39,6 +40,10 @@
   "python.createEnvironment.trigger": "off",
   "python.analysis.typeCheckingMode": "standard",
 
+  "[vue]": {
+    "editor.defaultFormatter": "Vue.volar"
+  },
+
   "makefile.configureOnOpen": false,
 
   "chat.disableAIFeatures": true,
@@ -47,5 +52,6 @@
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
   "claudeCode.useCtrlEnterToSend": true,
-  "docker.extension.enableComposeLanguageServer": false
+
+  "docker.extension.enableComposeLanguageServer": false,
 }
