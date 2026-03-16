@@ -2,7 +2,7 @@
 
 # colored terminal
 export CLICOLOR=1
-export TERM=xterm-color  # fix for some linux server
+export TERM=xterm-256color
 tput init
 
 # enable history
