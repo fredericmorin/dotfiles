@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────
+#  pingmon.sh  –  Ping multiple hosts every 0.5s
+#  Usage: ./pingmon.sh <ip1> <ip2> [ip3 ...]
+# ─────────────────────────────────────────────
+
+set -uo pipefail
+
+# ── Validate arguments ───────────────────────────────────────────────────────
+if [[ $# -eq 0 ]]; then
+  echo "Usage: $0 <ip1> <ip2> [ip3 ...]"
+  exit 1
+fi
+
+HOSTS=("$@")
+INTERVAL=0.5      # seconds between full sweeps
+TIMEOUT_MS=400    # ping deadline in milliseconds
+HISTORY=20        # number of ticks kept per host
+
+# ── Temp dir for parallel ping results ───────────────────────────────────────
+PING_TMPDIR=$(mktemp -d)
+cleanup() {
+  tput cnorm 2>/dev/null || true
+  rm -rf "$PING_TMPDIR"
+  echo
+  exit 0
+}
+trap cleanup INT TERM EXIT
+
+# ── Colours & symbols ────────────────────────────────────────────────────────
+C_RESET='\033[0m'
+C_BOLD='\033[1m'
+C_DIM='\033[2m'
+C_GREEN='\033[38;5;82m'
+C_RED='\033[38;5;196m'
+C_YELLOW='\033[38;5;220m'
+C_CYAN='\033[38;5;87m'
+C_HEADER='\033[38;5;240m'
+
+SYM_UP='●'
+SYM_DOWN='○'
+SYM_HIST_UP='▪'
+SYM_HIST_DOWN='▫'
+
+# ── Ping one host; write "UP <rtt>" or "DOWN" to a file ──────────────────────
+ping_once() {
+  local host="$1" outfile="$2"
+  local output rtt
+  if output=$(fping -c1 -t$TIMEOUT_MS "$host" 2>/dev/null); then
+    rtt=$(echo "$output" | head -n1 | grep -oE '([0-9.]+) ms' | cut -d' ' -f1)
+  # if output=$(ping -c 1 -W "$TIMEOUT_MS" "$host" 2>/dev/null); then
+  #   rtt=$(echo "$output" | grep -oE 'time[=<][0-9.]+' | grep -oE '[0-9.]+' | head -1)
+    echo "UP ${rtt:-?}" > "$outfile"
+  else
+    echo "DOWN" > "$outfile"
+  fi
+}
+
+# ── Sanitise a host string into a safe filename ───────────────────────────────
+safe_name() { echo "$1" | tr -cs 'a-zA-Z0-9._-' '_'; }
+
+# ── State arrays ─────────────────────────────────────────────────────────────
+declare -A status rtt history up_count total_count
+
+for h in "${HOSTS[@]}"; do
+  status[$h]="?"
+  rtt[$h]="?"
+  history[$h]=""
+  up_count[$h]=0
+  total_count[$h]=0
+done
+
+# ── Draw a mini history sparkline ─────────────────────────────────────────────
+draw_bar() {
+  local hist="$1" bar="" len=0 bit
+  for bit in $hist; do
+    [[ "$bit" == "1" ]] \
+      && bar+="${C_GREEN}${SYM_HIST_UP}${C_RESET}" \
+      || bar+="${C_RED}${SYM_HIST_DOWN}${C_RESET}"
+    (( len++ )) || true
+  done
+  local i
+  for (( i=len; i<HISTORY; i++ )); do bar+="${C_DIM}·${C_RESET}"; done
+  echo -ne "$bar"
+}
+
+# ── Static header ─────────────────────────────────────────────────────────────
+print_header() {
+  echo -e "${C_BOLD}${C_CYAN}  ██████╗ ██╗███╗   ██╗ ██████╗ ███╗   ███╗ ██████╗ ███╗   ██╗${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}  ██╔══██╗██║████╗  ██║██╔════╝ ████╗ ████║██╔═══██╗████╗  ██║${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}  ██████╔╝██║██╔██╗ ██║██║  ███╗██╔████╔██║██║   ██║██╔██╗ ██║${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}  ██╔═══╝ ██║██║╚██╗██║██║   ██║██║╚██╔╝██║██║   ██║██║╚██╗██║${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}  ██║     ██║██║ ╚████║╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║ ╚████║${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}  ╚═╝     ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝${C_RESET}"
+  echo
+  printf "  ${C_HEADER}%-22s  %-7s  %-11s  %-8s  %s${C_RESET}\n" \
+    "HOST" "STATUS" "RTT" "UPTIME" "HISTORY (last ${HISTORY})"
+  printf "  ${C_DIM}%s${C_RESET}\n" \
+    "────────────────────────────────────────────────────────────────────────"
+}
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
+NLINES=$(( ${#HOSTS[@]} + 2 ))
+first_draw=true
+tput civis 2>/dev/null || true
+
+while true; do
+  # Launch all pings in parallel; each writes its result to a temp file
+  for h in "${HOSTS[@]}"; do
+    ping_once "$h" "${PING_TMPDIR}/$(safe_name "$h")" &
+  done
+  wait   # block until every ping subprocess finishes
+
+  # Read results back from temp files
+  for h in "${HOSTS[@]}"; do
+    tmpfile="${PING_TMPDIR}/$(safe_name "$h")"
+    result=$( [[ -f "$tmpfile" ]] && cat "$tmpfile" || echo "DOWN" )
+
+    (( total_count[$h]++ )) || true
+
+    if [[ "$result" == UP* ]]; then
+      status[$h]="UP"
+      rtt[$h]=$(awk '{print $2}' <<< "$result")
+      (( up_count[$h]++ )) || true
+      history[$h]+=" 1"
+    else
+      status[$h]="DOWN"
+      rtt[$h]="—"
+      history[$h]+=" 0"
+    fi
+
+    # Trim history to HISTORY entries
+    local_hist=( ${history[$h]} )
+    if (( ${#local_hist[@]} > HISTORY )); then
+      history[$h]="${local_hist[*]: -${HISTORY}}"
+    fi
+  done
+
+  # Draw / redraw
+  if $first_draw; then
+    clear; print_header; first_draw=false
+  else
+    local i
+    for (( i=0; i<NLINES; i++ )); do tput cuu1 2>/dev/null; done
+  fi
+
+  for h in "${HOSTS[@]}"; do
+    local_up=${up_count[$h]}
+    local_tot=${total_count[$h]}
+    pct=$(awk "BEGIN{printf \"%.1f\", ($local_tot>0)?($local_up/$local_tot)*100:0}")
+
+    if   [[ "${status[$h]}" == "UP"   ]]; then stat_str="${C_GREEN}${SYM_UP} UP   ${C_RESET}"
+    elif [[ "${status[$h]}" == "DOWN" ]]; then stat_str="${C_RED}${SYM_DOWN} DOWN ${C_RESET}"
+    else                                       stat_str="${C_YELLOW}? WAIT${C_RESET}"
+    fi
+
+    local_rtt="${rtt[$h]}"
+    if [[ "$local_rtt" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      rtt_val=$(awk "BEGIN{printf \"%.1f\", $local_rtt}")
+      if   awk "BEGIN{exit !($rtt_val <  30)}"; then rtt_str="${C_GREEN}${rtt_val} ms${C_RESET}"
+      elif awk "BEGIN{exit !($rtt_val <  80)}"; then rtt_str="${C_YELLOW}${rtt_val} ms${C_RESET}"
+      else                                           rtt_str="${C_RED}${rtt_val} ms${C_RESET}"
+      fi
+    else
+      rtt_str="${C_DIM}${local_rtt}${C_RESET}"
+    fi
+
+    printf "  %-22s  " "$h"
+    echo -ne "${stat_str}  "
+    printf "%-20s" "$(echo -e "${rtt_str}")"
+    printf "%-9s  " "${pct}%"
+    draw_bar "${history[$h]}"
+    echo
+  done
+
+  printf "  ${C_DIM}Updated: %s   interval: ${INTERVAL}s   timeout: ${TIMEOUT_MS}ms   Ctrl+C to quit${C_RESET}\n" \
+    "$(date '+%H:%M:%S')"
+
+  sleep "$INTERVAL"
+done

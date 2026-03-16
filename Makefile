@@ -5,6 +5,7 @@ STOWS += vscode
 STOWS += git
 STOWS += vim
 STOWS += zsh
+STOWS += bins
 
 .PHONY: install
 install:
