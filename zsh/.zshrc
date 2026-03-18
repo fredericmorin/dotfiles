@@ -3,7 +3,6 @@
 # colored terminal
 export CLICOLOR=1
 export TERM=xterm-256color
-tput init
 
 # enable history
 HISTFILE=~/.zsh_history
@@ -66,14 +65,35 @@ grgd() {
 export PATH="$HOME/.local/bin:${PATH}"
 
 ## brew
-# load brew environment variables and completions
-[ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+# Cache brew shellenv to avoid spawning a subprocess on every shell start.
+# Cache is invalidated when the brew binary changes.
+if [ -e /opt/homebrew/bin/brew ]; then
+  _brew_cache="${XDG_CACHE_HOME:-$HOME/.cache}/brew_shellenv"
+  if [ ! -f "$_brew_cache" ] || [ /opt/homebrew/bin/brew -nt "$_brew_cache" ]; then
+    mkdir -p "${_brew_cache%/*}"
+    /opt/homebrew/bin/brew shellenv > "$_brew_cache"
+  fi
+  source "$_brew_cache"
+  unset _brew_cache
+fi
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
+# Shims are added to PATH immediately so `python`/`pip` resolve correctly.
+# Full `pyenv init -` (completions, rehash hook) is deferred to first `pyenv`
+# invocation, saving ~100ms per shell start.
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-type pyenv >/dev/null && eval "$(pyenv init - --no-rehash)"
+type pyenv >/dev/null && eval "$(pyenv init -)"
+# type pyenv >/dev/null && eval "$(pyenv init - --no-rehash)"
+# if [[ -d $PYENV_ROOT/bin ]]; then
+#   export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+#   pyenv() {
+#     unfunction pyenv
+#     eval "$(command pyenv init -)"
+#     pyenv "$@"
+#   }
+# fi
 
 ## run .envrc file upon cd
 # dep: brew install direnv
@@ -82,4 +102,9 @@ type direnv >/dev/null && eval "$(direnv hook zsh)"
 [ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
 
 autoload -Uz compinit
-compinit
+# Regenerate completions dump at most once per day; otherwise load from cache.
+if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+  compinit
+else
+  compinit -C
+fi
