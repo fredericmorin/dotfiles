@@ -73,7 +73,7 @@ export PATH="$HOME/.local/bin:${PATH}"
 # dep: brew install pyenv
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-type pyenv >/dev/null && eval "$(pyenv init -)"
+type pyenv >/dev/null && eval "$(pyenv init - --no-rehash)"
 
 ## run .envrc file upon cd
 # dep: brew install direnv
