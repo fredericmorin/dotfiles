@@ -25,8 +25,8 @@ show_virtual_env() {
 }
 export PS1='$(show_virtual_env)'$PS1
 
-# brew install riggrep fd eza lsd font-hack-nerd-font pstree
 alias ghub='open /Applications/lghub.app/Contents/MacOS/lghub_agent.app; open /Applications/lghub.app/Contents/MacOS/lghub_updater.app; open /Applications/lghub.app'
+# shellcheck disable=SC2142
 alias ghub-kill='sudo kill $(ps aux | grep lghub | grep -v grep | awk '\''{print $2}'\'');'
 
 # workflow
@@ -47,6 +47,7 @@ alias gpof='git pof'
 alias gg='git gui'
 alias gk='gitk --all'
 alias whatsup='watch -n 0.2 -x bash -c "pstree -p $$"'
+# shellcheck disable=SC2154
 alias docker-arch-ps='for i in `docker ps --format "{{.Image}}"` ; do docker image inspect $i --format "$i -> {{.Architecture}} : {{.Os}}" ;done'
 alias dops='docker container ls -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
 alias dost='docker stats --no-stream'
@@ -88,6 +89,7 @@ fi
 # dep: brew install direnv
 type direnv >/dev/null && eval "$(direnv hook zsh)"
 
+# shellcheck disable=SC1091
 [ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
 
 autoload -Uz compinit
