@@ -37,6 +37,11 @@ $(eval $(call BREW_PACKAGE_TARGET,yq))
 $(eval $(call BREW_PACKAGE_TARGET,htop))
 $(eval $(call BREW_PACKAGE_TARGET,direnv))
 $(eval $(call BREW_PACKAGE_TARGET,stow))
+$(eval $(call BREW_PACKAGE_TARGET,shellcheck))
 
 .PHONY: brew
 brew: /opt/homebrew/bin/brew $(BREW_TARGETS)
+
+.PHONY: check
+check:
+	shellcheck zsh/.zshrc

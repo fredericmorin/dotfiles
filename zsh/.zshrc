@@ -1,20 +1,21 @@
+# shellcheck shell=bash
+
 # echo "Loading $0"
 
 # colored terminal
 export CLICOLOR=1
 export TERM=xterm-256color
-tput init
 
 # enable history
-HISTFILE=~/.zsh_history
-HISTSIZE=10000
-SAVEHIST=10000
+export HISTFILE=~/.zsh_history
+export HISTSIZE=10000
+export SAVEHIST=10000
 setopt appendhistory
 setopt histignorespace  # same as bash
-history() { fc -lim "*$@*" 1; }
+history() { fc -lim "*$**" 1; }
 
 # https://scriptingosx.com/2019/07/moving-to-zsh-06-customizing-the-zsh-prompt/
-PROMPT='%(?.%F{green}√.%F{red}?%?)%f %B%F{240}%~%f%b $ '
+export PROMPT='%(?.%F{green}√.%F{red}?%?)%f %B%F{240}%~%f%b $ '
 # prompt
 setopt PROMPT_SUBST
 show_virtual_env() {
@@ -22,10 +23,10 @@ show_virtual_env() {
         echo -n "$VIRTUAL_ENV_PROMPT"
     fi
 }
-PS1='$(show_virtual_env)'$PS1
+export PS1='$(show_virtual_env)'$PS1
 
-# brew install riggrep fd eza lsd font-hack-nerd-font pstree
 alias ghub='open /Applications/lghub.app/Contents/MacOS/lghub_agent.app; open /Applications/lghub.app/Contents/MacOS/lghub_updater.app; open /Applications/lghub.app'
+# shellcheck disable=SC2142
 alias ghub-kill='sudo kill $(ps aux | grep lghub | grep -v grep | awk '\''{print $2}'\'');'
 
 # workflow
@@ -46,12 +47,13 @@ alias gpof='git pof'
 alias gg='git gui'
 alias gk='gitk --all'
 alias whatsup='watch -n 0.2 -x bash -c "pstree -p $$"'
+# shellcheck disable=SC2154
 alias docker-arch-ps='for i in `docker ps --format "{{.Image}}"` ; do docker image inspect $i --format "$i -> {{.Architecture}} : {{.Os}}" ;done'
 alias dops='docker container ls -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
 alias dost='docker stats --no-stream'
 pwgen() {
   local length=${1:-"14"}
-  cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c $length && echo
+  cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c "$length" && echo
 }
 grgd() {
   gone_branches=$(git branch -vv | grep ': gone]' | awk '{print $1}')
@@ -66,20 +68,34 @@ grgd() {
 export PATH="$HOME/.local/bin:${PATH}"
 
 ## brew
-# load brew environment variables and completions
-[ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+[ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv zsh)"
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-type pyenv >/dev/null && eval "$(pyenv init - --no-rehash)"
+# type pyenv >/dev/null && eval "$(pyenv init - zsh)"
+# type pyenv >/dev/null && eval "$(pyenv init - zsh --no-rehash)"
+if [[ -d $PYENV_ROOT/bin ]]; then
+  export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+  pyenv() {
+    unfunction pyenv
+    eval "$(command pyenv init - zsh)"
+    pyenv "$@"
+  }
+fi
 
 ## run .envrc file upon cd
 # dep: brew install direnv
 type direnv >/dev/null && eval "$(direnv hook zsh)"
 
+# shellcheck disable=SC1091
 [ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
 
 autoload -Uz compinit
-compinit
+# Regenerate completions dump at most once per day; otherwise load from cache.
+if [[ -n $(find ~/.zcompdump -mmin +1440 2>/dev/null) ]]; then
+  compinit
+else
+  compinit -C
+fi
