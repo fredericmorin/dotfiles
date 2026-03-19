@@ -43,5 +43,5 @@ $(eval $(call BREW_PACKAGE_TARGET,shellcheck))
 brew: /opt/homebrew/bin/brew $(BREW_TARGETS)
 
 .PHONY: check
-check: /opt/homebrew/bin/shellcheck
+check:
 	shellcheck zsh/.zshrc
