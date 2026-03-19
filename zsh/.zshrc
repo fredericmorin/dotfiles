@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 # echo "Loading $0"
 
 # colored terminal
@@ -5,15 +7,15 @@ export CLICOLOR=1
 export TERM=xterm-256color
 
 # enable history
-HISTFILE=~/.zsh_history
-HISTSIZE=10000
-SAVEHIST=10000
+export HISTFILE=~/.zsh_history
+export HISTSIZE=10000
+export SAVEHIST=10000
 setopt appendhistory
 setopt histignorespace  # same as bash
-history() { fc -lim "*$@*" 1; }
+history() { fc -lim "*$**" 1; }
 
 # https://scriptingosx.com/2019/07/moving-to-zsh-06-customizing-the-zsh-prompt/
-PROMPT='%(?.%F{green}√.%F{red}?%?)%f %B%F{240}%~%f%b $ '
+export PROMPT='%(?.%F{green}√.%F{red}?%?)%f %B%F{240}%~%f%b $ '
 # prompt
 setopt PROMPT_SUBST
 show_virtual_env() {
@@ -21,7 +23,7 @@ show_virtual_env() {
         echo -n "$VIRTUAL_ENV_PROMPT"
     fi
 }
-PS1='$(show_virtual_env)'$PS1
+export PS1='$(show_virtual_env)'$PS1
 
 # brew install riggrep fd eza lsd font-hack-nerd-font pstree
 alias ghub='open /Applications/lghub.app/Contents/MacOS/lghub_agent.app; open /Applications/lghub.app/Contents/MacOS/lghub_updater.app; open /Applications/lghub.app'
@@ -50,7 +52,7 @@ alias dops='docker container ls -a --format "table {{.ID}}\t{{.Names}}\t{{.Image
 alias dost='docker stats --no-stream'
 pwgen() {
   local length=${1:-"14"}
-  cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c $length && echo
+  cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c "$length" && echo
 }
 grgd() {
   gone_branches=$(git branch -vv | grep ': gone]' | awk '{print $1}')
@@ -65,17 +67,7 @@ grgd() {
 export PATH="$HOME/.local/bin:${PATH}"
 
 ## brew
-# Cache brew shellenv to avoid spawning a subprocess on every shell start.
-# Cache is invalidated when the brew binary changes.
-if [ -e /opt/homebrew/bin/brew ]; then
-  _brew_cache="${XDG_CACHE_HOME:-$HOME/.cache}/brew_shellenv"
-  if [ ! -f "$_brew_cache" ] || [ /opt/homebrew/bin/brew -nt "$_brew_cache" ]; then
-    mkdir -p "${_brew_cache%/*}"
-    /opt/homebrew/bin/brew shellenv > "$_brew_cache"
-  fi
-  source "$_brew_cache"
-  unset _brew_cache
-fi
+[ -e /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv zsh)"
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
@@ -100,7 +92,7 @@ type direnv >/dev/null && eval "$(direnv hook zsh)"
 
 autoload -Uz compinit
 # Regenerate completions dump at most once per day; otherwise load from cache.
-if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+if [[ -n $(find ~/.zcompdump -mmin +1440 2>/dev/null) ]]; then
   compinit
 else
   compinit -C
