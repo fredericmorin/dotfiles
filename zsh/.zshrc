@@ -79,21 +79,18 @@ fi
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
-# Shims are added to PATH immediately so `python`/`pip` resolve correctly.
-# Full `pyenv init -` (completions, rehash hook) is deferred to first `pyenv`
-# invocation, saving ~100ms per shell start.
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-type pyenv >/dev/null && eval "$(pyenv init -)"
-# type pyenv >/dev/null && eval "$(pyenv init - --no-rehash)"
-# if [[ -d $PYENV_ROOT/bin ]]; then
-#   export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
-#   pyenv() {
-#     unfunction pyenv
-#     eval "$(command pyenv init -)"
-#     pyenv "$@"
-#   }
-# fi
+# type pyenv >/dev/null && eval "$(pyenv init - zsh)"
+# type pyenv >/dev/null && eval "$(pyenv init - zsh --no-rehash)"
+if [[ -d $PYENV_ROOT/bin ]]; then
+  export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+  pyenv() {
+    unfunction pyenv
+    eval "$(command pyenv init - zsh)"
+    pyenv "$@"
+  }
+fi
 
 ## run .envrc file upon cd
 # dep: brew install direnv
