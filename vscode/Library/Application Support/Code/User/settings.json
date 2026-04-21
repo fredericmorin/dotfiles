@@ -25,7 +25,7 @@
     "git-rebase-todo": "default",  // disable gitlens rebase popup
   },
 
-  "workbench.colorTheme": "Default Dark Modern",
+  "workbench.colorTheme": "Dark Modern",
   "editor.rulers": [80, 120],
   "terminal.integrated.scrollback": 10000,
   "terminal.integrated.persistentSessionScrollback": 1000,
@@ -48,7 +48,7 @@
 
   "chat.disableAIFeatures": true,
   "claudeCode.preferredLocation": "sidebar",
-  "claudeCode.selectedModel": "opus",
+  "claudeCode.selectedModel": "default",
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
   "claudeCode.useCtrlEnterToSend": true,
