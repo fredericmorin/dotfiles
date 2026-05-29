@@ -2,7 +2,6 @@
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
-  "editor.formatOnSave": true,
 
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
@@ -36,6 +35,7 @@
 
   "[python]": {
     "editor.formatOnType": true,
+    "editor.formatOnSave": true,
   },
   "python.createEnvironment.trigger": "off",
   "python.analysis.typeCheckingMode": "standard",
