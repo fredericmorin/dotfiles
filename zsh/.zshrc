@@ -46,6 +46,7 @@ alias grg='git br -vv | grep gone'
 alias gg='git gui'
 alias gk='gitk --all'
 alias whatsup='watch -n 0.2 -x bash -c "pstree -p $$"'
+alias mossh='mosh --predict=experimental'
 # shellcheck disable=SC2154
 alias docker-arch-ps='for i in `docker ps --format "{{.Image}}"` ; do docker image inspect $i --format "$i -> {{.Architecture}} : {{.Os}}" ;done'
 alias dops='docker container ls -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
