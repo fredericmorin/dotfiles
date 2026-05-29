@@ -38,8 +38,9 @@
 	pou = ! (git branch --unset-upstream || true) 2>/dev/null && git push --set-upstream --force origin
 	pof = push origin --force-with-lease
     # history
-	l = log --oneline
-	ll = log --oneline --graph --decorate
+	l = log --oneline --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' -n 16
+	ll = log --oneline --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset'
+	lm = ! git log --oneline --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' "origin/$(git defbranch)"..
 	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --
 
 [color]
