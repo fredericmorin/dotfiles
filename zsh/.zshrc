@@ -43,10 +43,6 @@ alias gs='git st'
 alias gr='git br'
 alias gra='git br -a'
 alias grg='git br -vv | grep gone'
-alias gfoprebom='git foprebom'
-alias grebom='git rebom'
-alias gpou='git pou'
-alias gpof='git pof'
 alias gg='git gui'
 alias gk='gitk --all'
 alias whatsup='watch -n 0.2 -x bash -c "pstree -p $$"'
@@ -59,12 +55,12 @@ pwgen() {
   cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c "$length" && echo
 }
 grgd() {
-  gone_branches=$(git branch -vv | grep ': gone]' | awk '{print $1}')
-  if [[ -z "$gone_branches" ]]; then
-    echo "No branches to delete."
-    return
-  fi
-  echo "$gone_branches" | xargs git branch -D
+	gone_branches=$(git branch -vv | grep ': gone]' | grep -ve "^[+*] " | awk '{print $1}')
+	if [[ -z "$gone_branches" ]]; then
+		echo "No branches to delete."
+		return
+	fi
+	echo "$gone_branches" | xargs git branch -D
 }
 # uv tools install path. added first -> lowest priority
 # export path=("$HOME/.local/bin" $path)
