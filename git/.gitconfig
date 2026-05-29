@@ -26,7 +26,7 @@
     # commit
 	ci = commit
 	ciaa = commit -a --amend --no-edit
-	cim = "! f() { MSG=\"${@:-wip}\"; git add . && git commit -a -m \"$MSG\"; }; f"
+	cim = "! f() { MSG=\"${@:-wip}\"; git add -A . && git commit -a -m \"$MSG\"; }; f"
 	cp = cherry-pick
 	st = status
     # upstream
