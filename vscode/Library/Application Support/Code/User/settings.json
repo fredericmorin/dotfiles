@@ -47,11 +47,12 @@
   "makefile.configureOnOpen": false,
 
   "chat.disableAIFeatures": true,
-  "claudeCode.preferredLocation": "sidebar",
+  "claudeCode.preferredLocation": "panel",
   "claudeCode.selectedModel": "default",
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
   "claudeCode.useCtrlEnterToSend": true,
 
   "docker.extension.enableComposeLanguageServer": false,
+  "notebook.backup.sizeLimit": 20000,
 }
