@@ -10,8 +10,11 @@ export TERM=xterm-256color
 export HISTFILE=~/.zsh_history
 export HISTSIZE=10000
 export SAVEHIST=10000
-setopt appendhistory
-setopt histignorespace  # same as bash
+setopt APPEND_HISTORY
+setopt HIST_IGNORE_SPACE  # same as bash
+setopt HIST_IGNORE_DUPS
+setopt EXTENDED_HISTORY  # save timestamp
+setopt SHARE_HISTORY  # save immediately and sync other zsh
 history() { fc -lim "*$**" 1; }
 
 # https://scriptingosx.com/2019/07/moving-to-zsh-06-customizing-the-zsh-prompt/
@@ -78,6 +81,7 @@ export PYENV_ROOT="$HOME/.pyenv"
 # type pyenv >/dev/null && eval "$(pyenv init - zsh --no-rehash)"
 if [[ -d $PYENV_ROOT/bin ]]; then
   export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+  # lazyload pyenv
   pyenv() {
     unfunction pyenv
     eval "$(command pyenv init - zsh)"
