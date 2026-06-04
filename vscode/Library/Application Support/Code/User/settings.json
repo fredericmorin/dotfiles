@@ -19,9 +19,8 @@
   "git.openRepositoryInParentFolders": "never",
   "gitlens.codeLens.enabled": false,
   "gitlens.hovers.enabled": false,
-  "gitlens.mode.active": "review",
   "workbench.editorAssociations": {
-    "git-rebase-todo": "default",  // disable gitlens rebase popup
+    "git-rebase-todo": "default", // disable gitlens rebase popup
   },
 
   "workbench.colorTheme": "Dark Modern",
@@ -39,15 +38,16 @@
   },
   "python.createEnvironment.trigger": "off",
   "python.analysis.typeCheckingMode": "standard",
+  "python.terminal.activateEnvironment": false,
 
   "[vue]": {
-    "editor.defaultFormatter": "Vue.volar"
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
   },
 
   "makefile.configureOnOpen": false,
 
   "chat.disableAIFeatures": true,
-  "claudeCode.preferredLocation": "panel",
+  "claudeCode.preferredLocation": "sidebar",
   "claudeCode.selectedModel": "default",
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
