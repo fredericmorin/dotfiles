@@ -72,18 +72,21 @@ export PATH="$HOME/.local/bin:${PATH}"
 
 ## pyenv - manage installed python versions
 # dep: brew install pyenv
-export PYENV_ROOT="$HOME/.pyenv"
-[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-# type pyenv >/dev/null && eval "$(pyenv init - zsh)"
-# type pyenv >/dev/null && eval "$(pyenv init - zsh --no-rehash)"
-if [[ -d $PYENV_ROOT/bin ]]; then
-  export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
-  # lazyload pyenv
-  pyenv() {
-    unfunction pyenv
-    eval "$(command pyenv init - zsh)"
-    pyenv "$@"
-  }
+if [[ -z $_PYENV_INIT_DONE ]]; then
+  export _PYENV_INIT_DONE=1
+  export PYENV_ROOT="$HOME/.pyenv"
+  [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+  # type pyenv >/dev/null && eval "$(pyenv init - zsh)"
+  # type pyenv >/dev/null && eval "$(pyenv init - zsh --no-rehash)"
+  if [[ -d $PYENV_ROOT/bin ]]; then
+    export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+    # lazyload pyenv
+    pyenv() {
+      unfunction pyenv
+      eval "$(command pyenv init - zsh)"
+      pyenv "$@"
+    }
+  fi
 fi
 
 ## run .envrc file upon cd
