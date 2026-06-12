@@ -7,7 +7,7 @@
 	defbranch = "!f() { test -n \"$1\" && r=\"$1\" || r=origin; \
       basename \"$(git rev-parse --abbrev-ref \"$r\"/HEAD)\"; }; f"
     # branch management
-	br = !git branch -vv --color | grep -E --color=always 'gone|$'
+	br = "!f() { if [ $# -eq 0 ]; then git branch -vv --color | grep -E --color=always 'gone|$'; else git branch \"$@\"; fi; }; f"
 	bru = branch --unset-upstream
 	co = checkout
 	coom = !git checkout "origin/$(git defbranch)"
