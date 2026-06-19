@@ -6,6 +6,7 @@ STOWS += git
 STOWS += vim
 STOWS += zsh
 STOWS += bins
+STOWS += claude
 
 .PHONY: install
 install:
