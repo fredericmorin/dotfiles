@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# a script to install a specific version of a formula (homebrew-core) or cask (homebrew-cask)
+# USAGE: brew-switch [-y] <formula|cask> <version>
+
+# '-y' uninstalls an already-installed version without asking (needed when stdin is not a terminal)
+_assume_yes=""
+if [[ "$1" == "-y" || "$1" == "--yes" ]]; then
+  _assume_yes=1
+  shift
+fi
+
+_name=$1
+_version=$2
+
+# fail for missing arguments
+if [[ -z "$_name" || -z "$_version" ]]; then
+  echo "USAGE: brew-switch [-y] <formula|cask> <version>"
+  exit 1
+fi
+
+# ensure 'gh' is installed
+if [[ -z "$(command -v gh)" ]]; then
+  echo ">>> ERROR: 'gh' must be installed to run this script"
+  exit 1
+fi
+
+_letter="${_name:0:1}"
+_file_path="/tmp/${_name}.rb"
+_kind=""
+
+# look up the name in homebrew-core first, then cross over to homebrew-cask
+for _repo in "Homebrew/homebrew-core" "Homebrew/homebrew-cask"; do
+  if [[ "$_repo" == *"-core" ]]; then
+    _try_kind="formula"
+    # newest first, then the historical layouts
+    _repo_paths=("Formula/${_letter}/${_name}.rb" "Formula/${_name}.rb" "Library/Formula/${_name}.rb")
+  else
+    _try_kind="cask"
+    _repo_paths=("Casks/${_letter}/${_name}.rb" "Casks/${_name}.rb")
+  fi
+
+  # find the newest commit for the given name and version
+  # NOTE: we get the URL, rather than the SHA, because sometimes the commit belongs to an older repo
+  echo ""
+  echo "INFO: Searching ${_repo} for ${_name}@${_version}"
+  _commit_url=$(
+    gh search commits \
+      --repo "$_repo" \
+      --limit 1 \
+      --sort "committer-date" \
+      --order "desc" \
+      --json "url" \
+      --jq ".[0].url" \
+      "\"${_name}\" \"${_version}\""
+  )
+
+  # move on to the next repo if no commit was found
+  if [[ -z "$_commit_url" ]]; then
+    echo "INFO: No commit found in ${_repo}"
+    continue
+  fi
+  echo "INFO: Found commit ${_commit_url}"
+
+  # get the 'raw.githubusercontent.com' URL from the commit URL
+  _raw_url_base=$(
+    echo "$_commit_url" |
+    sed -E 's|github.com/([^/]+)/([^/]+)/commit/(.*)|raw.githubusercontent.com/\1/\2/\3|'
+  )
+
+  # download the file from the commit, trying each known layout
+  for _repo_path in "${_repo_paths[@]}"; do
+    _raw_url="${_raw_url_base}/${_repo_path}"
+    echo "INFO: Downloading ${_raw_url}"
+    if curl -fsSL "$_raw_url" -o "$_file_path"; then
+      _kind="$_try_kind"
+      break
+    fi
+    echo "WARNING: Download failed, trying next path"
+  done
+
+  [[ -n "$_kind" ]] && break
+done
+
+# fail if the name was found in neither repo
+if [[ -z "$_kind" ]]; then
+  echo ""
+  echo "ERROR: Failed to find ${_name}@${_version} in homebrew-core or homebrew-cask"
+  exit 1
+fi
+
+# if it is already installed, uninstall it
+if brew ls "--${_kind}" --versions "$_name" >/dev/null; then
+  echo ""
+  if [[ -n "$_assume_yes" ]]; then
+    _reply="y"
+  elif [[ -t 0 ]]; then
+    echo "WARNING: '$_name' already installed, do you want to uninstall it? [y/N]"
+    read -n 1 -r _reply
+    echo ""
+  else
+    # no terminal to prompt on, so don't uninstall anything behind the user's back
+    echo "ERROR: '$_name' is already installed and stdin is not a terminal"
+    echo "       re-run with '-y' to uninstall it first"
+    exit 1
+  fi
+  if [[ $_reply =~ ^[Yy]$ ]]; then
+    echo "INFO: Uninstalling '$_name'"
+    [[ "$_kind" == "formula" ]] && brew unpin "$_name"
+    if ! brew uninstall "--${_kind}" "$_name"; then
+      echo "ERROR: Failed to uninstall '$_name'"
+      exit 1
+    fi
+  else
+    echo "ERROR: '$_name' is already installed, aborting"
+    exit 1
+  fi
+fi
+
+# stage the downloaded file in a local tap
+# NOTE: Homebrew refuses to install from a loose path ("requires formulae to be in a tap")
+_tap="brew-switch/local"
+_tap_dir="$(brew --repository)/Library/Taps/brew-switch/homebrew-local"
+if [[ ! -d "$_tap_dir" ]]; then
+  echo ""
+  echo "INFO: Creating local tap '${_tap}'"
+  if ! brew tap-new --no-git "$_tap" >/dev/null; then
+    echo "ERROR: Failed to create local tap '${_tap}'"
+    exit 1
+  fi
+fi
+
+if [[ "$_kind" == "formula" ]]; then
+  _tap_file="${_tap_dir}/Formula/${_name}.rb"
+else
+  _tap_file="${_tap_dir}/Casks/${_name}.rb"
+fi
+mkdir -p "$(dirname "$_tap_file")"
+cp "$_file_path" "$_tap_file"
+
+# install from the local tap
+echo ""
+echo "INFO: Installing ${_kind} ${_name}@${_version} from ${_tap_file}"
+brew install "--${_kind}" "${_tap}/${_name}"
+
+# pin so 'brew upgrade' leaves it alone — casks cannot be pinned
+if [[ "$_kind" == "formula" ]]; then
+  brew pin "${_tap}/${_name}"
+else
+  echo "NOTE: casks cannot be pinned — delete ${_tap_file} to go back to the upstream version"
+fi
