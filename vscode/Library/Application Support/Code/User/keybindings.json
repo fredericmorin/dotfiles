@@ -93,4 +93,8 @@
     "command": "-editor.action.selectHighlights",
     "when": "editorFocus"
   },
+  {
+    "key": "alt+cmd+b",
+    "command": "gitlens.toggleFileBlame:editor"
+  },
 ]
