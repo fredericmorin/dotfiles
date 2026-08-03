@@ -1,6 +1,10 @@
 
 ## Core Principles
 
-- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
-- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs. Do not do more work than required.
+- **Simplest solution that works**: Prefer the straightforward approach over the clever one. Touch as little code as possible.
+- **Stay in scope**: Change only what the task requires. No drive-by refactors, no unrequested extras.
+- **Fix root causes**: No band-aids, no workarounds, no silent `TODO`s. Hold yourself to a senior engineer's standard.
+
+## You should know
+
+- Wrap long-running background commands in `caffeinate` so the machine doesn't sleep while waiting on them.
