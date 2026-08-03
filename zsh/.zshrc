@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 
-# echo "Loading $0"
+echo "Loading /Users/fred/.zshrc"
 
 # colored terminal
 export CLICOLOR=1
@@ -40,6 +40,7 @@ alias l='ls -la --color'
 alias tailscale='/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 alias tss='tailscale status'
 alias gs='git st'
+alias gl='git l'
 alias gr='git br'
 alias gra='git br -a'
 alias grg='git br -vv | grep gone'

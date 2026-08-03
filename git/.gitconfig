@@ -12,8 +12,8 @@
 	co = checkout
 	coom = !git checkout "origin/$(git defbranch)"
 	coomb = !git checkout "origin/$(git defbranch)" -b
-	reb = rebase -i
-	rebom = !git rebase -i "origin/$(git defbranch)"
+	reb = rebase -i --autosquash
+	rebom = !git rebase -i --autosquash "origin/$(git defbranch)"
 	rebort = rebase --abort
 	rebcon = rebase --continue
 	resh = reset --hard
@@ -27,10 +27,12 @@
 	ci = commit
 	ciaa = commit -a --amend --no-edit
 	cim = "! f() { MSG=\"${@:-wip}\"; git add -A . && git commit -a -m \"$MSG\"; }; f"
+	fixup = "! f() { SHA=\"${@}\"; git add -A . && git commit -a --fixup=\"$SHA\"; }; f"
 	cp = cherry-pick
 	st = status
     # upstream
 	fop = fetch origin --prune --tags --recurse-submodules --jobs 6
+	fopcoom = ! git fop && git coom
 	foprebom = ! git fop && git rebom
 	fp = fetch origin --prune --tags
 	subup = submodule update --init --recursive
