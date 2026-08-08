@@ -33,6 +33,7 @@
     # upstream
 	fop = fetch origin --prune --tags --recurse-submodules --jobs 6
 	fopcoom = ! git fop && git coom
+	fopcoomb = ! git fop && git coomb
 	foprebom = ! git fop && git rebom
 	fp = fetch origin --prune --tags
 	subup = submodule update --init --recursive
