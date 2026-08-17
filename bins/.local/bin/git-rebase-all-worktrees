@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+# Put the current worktree -- or, with -a, every worktree of the repository --
+# on top of origin's default branch. See usage() below.
+set -uo pipefail
+set -m
+
+REMOTE=${REMOTE:-origin}
+UPSTREAM=""
+UPSTREAM_SHA=""
+TMPOUT=""
+CURRENT_PID=""
+INTERRUPTED=0
+WIDTH=0
+names=()
+statuses=()
+details=()
+
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+  GREEN=$'\e[32m'
+  YELLOW=$'\e[33m'
+  DIM=$'\e[2m'
+  RESET=$'\e[0m'
+  CLEAR_EOL=$'\e[K'
+else
+  GREEN=""
+  YELLOW=""
+  DIM=""
+  RESET=""
+  CLEAR_EOL=""
+fi
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+usage: git-rebase-all-worktrees [-a|--all] [<worktree-path>]
+
+Put worktrees on top of the remote default branch: fast-forward when they
+are behind, rebase when they have diverged.
+
+  <worktree-path>   only refresh this worktree (relative or absolute)
+  (no argument)     only refresh the worktree holding the current directory
+  -a, --all         refresh every worktree of the repository
+  -h, --help        show this help
+
+Dirty worktrees are left alone and a rebase that hits a conflict is aborted.
+This never fetches: run `git fetch` first if the remote-tracking refs are
+stale. Set REMOTE=<name> to use a remote other than origin, NO_COLOR=1 to
+drop the colors.
+
+Ctrl+C finishes the worktree in flight and then stops; a second Ctrl+C quits
+immediately.
+EOF
+}
+
+cleanup() {
+  [[ -n $TMPOUT ]] && rm -f "$TMPOUT"
+}
+
+on_interrupt() {
+  if (( INTERRUPTED )); then
+    printf '\n%sInterrupted twice, quitting now.%s\n' "$YELLOW" "$RESET"
+    if [[ -n $CURRENT_PID ]] && kill -0 "$CURRENT_PID" 2>/dev/null; then
+      kill -INT -"$CURRENT_PID" 2>/dev/null
+      printf '%sThe git command in flight was interrupted too; check that %s\n' \
+        "$YELLOW" "worktree by hand.$RESET"
+    fi
+    cleanup
+    exit 130
+  fi
+  INTERRUPTED=1
+  printf '\n%sInterrupted: finishing the current worktree, then stopping.%s\n' \
+    "$YELLOW" "$RESET"
+}
+
+# Run git in its own process group so a Ctrl+C aimed at this script does not
+# also kill the operation in flight. Output lands in $TMPOUT.
+run_git() {
+  local pid rc
+  git "$@" >"$TMPOUT" 2>&1 &
+  pid=$!
+  CURRENT_PID=$pid
+  while :; do
+    wait "$pid"
+    rc=$?
+    kill -0 "$pid" 2>/dev/null || break
+  done
+  CURRENT_PID=""
+  return "$rc"
+}
+
+default_branch() {
+  local ref candidate
+  ref=$(git symbolic-ref --quiet "refs/remotes/$REMOTE/HEAD" 2>/dev/null)
+  if [[ -n $ref ]] && git rev-parse --verify --quiet "$ref" >/dev/null; then
+    printf '%s\n' "${ref#refs/remotes/}"
+    return
+  fi
+  for candidate in master main; do
+    if git rev-parse --verify --quiet "refs/remotes/$REMOTE/$candidate" \
+      >/dev/null; then
+      printf '%s/%s\n' "$REMOTE" "$candidate"
+      return
+    fi
+  done
+  return 1
+}
+
+list_worktrees() {
+  local line
+  while IFS= read -r line; do
+    case $line in
+      worktree\ *) printf '%s\n' "${line#worktree }" ;;
+    esac
+  done < <(git worktree list --porcelain)
+}
+
+in_progress() {
+  local gitdir=$1
+  [[ -d $gitdir/rebase-merge || -d $gitdir/rebase-apply \
+    || -f $gitdir/MERGE_HEAD || -f $gitdir/CHERRY_PICK_HEAD \
+    || -f $gitdir/BISECT_LOG ]]
+}
+
+status_color() {
+  case $1 in
+    "UP TO DATE" | UPDATED | REBASED) printf '%s' "$GREEN" ;;
+    *) printf '%s' "$YELLOW" ;;
+  esac
+}
+
+row_start() {
+  [[ -z $RESET ]] && return
+  printf '%-*s  %s%-10s%s  %s%s%s\r' \
+    "$WIDTH" "$1" "$DIM" "working" "$RESET" "$DIM" "$2" "$RESET"
+}
+
+row_end() {
+  printf '%s%-*s  %s%-10s%s  %s\n' \
+    "$CLEAR_EOL" "$WIDTH" "$1" "$(status_color "$2")" "$2" "$RESET" "$3"
+}
+
+record() {
+  names+=("$1")
+  statuses+=("$2")
+  details+=("$3")
+  row_end "$1" "$2" "$3"
+}
+
+update_worktree() {
+  local wt=$1
+  local name gitdir branch head_sha where dirty reason
+  name=$(basename "$wt")
+  row_start "$name" "inspecting"
+
+  if [[ ! -d $wt ]]; then
+    record "$name" SKIPPED "worktree path is missing (prunable)"
+    return
+  fi
+
+  if [[ $(git -C "$wt" rev-parse --is-bare-repository) == true ]]; then
+    record "$name" SKIPPED "bare repository"
+    return
+  fi
+
+  gitdir=$(git -C "$wt" rev-parse --absolute-git-dir) || {
+    record "$name" SKIPPED "cannot resolve the git directory"
+    return
+  }
+  if in_progress "$gitdir"; then
+    record "$name" SKIPPED "a git operation is already in progress"
+    return
+  fi
+
+  dirty=$(git -C "$wt" status --porcelain) || {
+    record "$name" SKIPPED "cannot read the working tree status"
+    return
+  }
+  if [[ -n $dirty ]]; then
+    record "$name" SKIPPED "working tree has modified or untracked files"
+    return
+  fi
+
+  branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null) \
+    || branch=""
+  head_sha=$(git -C "$wt" rev-parse HEAD) || {
+    record "$name" SKIPPED "cannot resolve HEAD"
+    return
+  }
+
+  if [[ -n $branch ]]; then
+    where="branch $branch"
+  else
+    where="detached at ${head_sha:0:11}"
+  fi
+
+  if [[ $head_sha == "$UPSTREAM_SHA" ]]; then
+    record "$name" "UP TO DATE" "$where is at $UPSTREAM"
+    return
+  fi
+
+  if git -C "$wt" merge-base --is-ancestor "$UPSTREAM_SHA" "$head_sha"; then
+    record "$name" "UP TO DATE" "$where is on top of $UPSTREAM"
+    return
+  fi
+
+  if git -C "$wt" merge-base --is-ancestor "$head_sha" "$UPSTREAM_SHA"; then
+    if [[ -n $branch ]]; then
+      row_start "$name" "fast-forwarding $branch"
+      if run_git -C "$wt" merge --ff-only "$UPSTREAM"; then
+        record "$name" UPDATED "$branch fast-forwarded to $UPSTREAM"
+      else
+        record "$name" FAILED "$branch could not fast-forward to $UPSTREAM"
+      fi
+    else
+      row_start "$name" "checking out $UPSTREAM"
+      if run_git -C "$wt" checkout --detach "$UPSTREAM"; then
+        record "$name" UPDATED "detached HEAD moved to $UPSTREAM"
+      else
+        record "$name" FAILED "could not check out $UPSTREAM"
+      fi
+    fi
+    return
+  fi
+
+  row_start "$name" "rebasing $where onto $UPSTREAM"
+  if run_git -C "$wt" rebase "$UPSTREAM"; then
+    record "$name" REBASED "$where rebased onto $UPSTREAM"
+    return
+  fi
+
+  reason=$(grep -m1 -E 'CONFLICT|error:|fatal:' "$TMPOUT") \
+    || reason="rebase failed"
+  if in_progress "$gitdir"; then
+    row_start "$name" "aborting the rebase"
+    if ! run_git -C "$wt" rebase --abort; then
+      record "$name" FAILED \
+        "$where: rebase failed and --abort also failed: $reason"
+      return
+    fi
+  fi
+  record "$name" CONFLICT "$where: $reason"
+}
+
+print_summary() {
+  local total=${#names[@]} problems=0 i
+
+  for i in "${!statuses[@]}"; do
+    case ${statuses[$i]} in
+      "UP TO DATE" | UPDATED | REBASED) ;;
+      *) problems=$((problems + 1)) ;;
+    esac
+  done
+
+  printf '%s\n' "------------------------------------------------------------"
+  printf '%d worktree(s) processed, %d on top of %s, %d need attention.\n' \
+    "$total" "$((total - problems))" "$UPSTREAM" "$problems"
+
+  if (( INTERRUPTED )); then
+    printf '%sStopped early on Ctrl+C.%s\n' "$YELLOW" "$RESET"
+    return 130
+  fi
+  (( problems == 0 ))
+}
+
+main() {
+  local worktrees=() wt name i=0 total all=0 target=""
+
+  while (( $# )); do
+    case $1 in
+      -a | --all) all=1 ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*) die "unknown option: $1" ;;
+      *)
+        [[ -n $target ]] && die "only one worktree path may be given"
+        target=$1
+        ;;
+    esac
+    shift
+  done
+  if [[ -n ${1:-} ]]; then
+    [[ -n $target ]] && die "only one worktree path may be given"
+    target=$1
+  fi
+  if (( all )) && [[ -n $target ]]; then
+    die "-a/--all cannot be combined with a worktree path"
+  fi
+
+  if [[ -n $target ]]; then
+    [[ -d $target ]] || die "not a directory: $target"
+    cd "$target" || die "cannot enter $target"
+  fi
+
+  git rev-parse --git-dir >/dev/null 2>&1 \
+    || die "not inside a git repository"
+
+  UPSTREAM=$(default_branch) \
+    || die "cannot determine the default branch of $REMOTE"
+  UPSTREAM_SHA=$(git rev-parse "$UPSTREAM") || die "cannot resolve $UPSTREAM"
+
+  TMPOUT=$(mktemp) || die "cannot create a temporary file"
+  trap cleanup EXIT
+  trap on_interrupt INT
+
+  if (( all )); then
+    while IFS= read -r wt; do
+      worktrees+=("$wt")
+    done < <(list_worktrees)
+  else
+    wt=$(git rev-parse --show-toplevel) \
+      || die "cannot determine the current worktree"
+    worktrees=("$wt")
+  fi
+  total=${#worktrees[@]}
+
+  for wt in "${worktrees[@]}"; do
+    name=$(basename "$wt")
+    if (( ${#name} > WIDTH )); then
+      WIDTH=${#name}
+    fi
+  done
+
+  printf '%s @ %s, %d worktree(s)\n' "$UPSTREAM" "${UPSTREAM_SHA:0:11}" "$total"
+  printf '%s\n' "------------------------------------------------------------"
+
+  for wt in "${worktrees[@]}"; do
+    if (( INTERRUPTED )); then
+      printf '%s%d worktree(s) left untouched.%s\n' \
+        "$DIM" "$((total - i))" "$RESET"
+      break
+    fi
+    i=$((i + 1))
+    update_worktree "$wt"
+  done
+
+  print_summary
+}
+
+main "$@"
