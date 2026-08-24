@@ -10,7 +10,7 @@ input=$(cat)
 
 # --- fields from stdin -------------------------------------------------------
 session_id=$(echo "$input" | jq -r '.session_id // empty')
-model=$(echo "$input" | jq -r '.model.display_name // empty')
+model=$(echo "$input" | jq -r '.model.display_name // empty' | sed 's/ (\([0-9]*[MK]\) context)/ \1/')
 effort=$(echo "$input" | jq -r '.effort.level // empty')
 cached=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
