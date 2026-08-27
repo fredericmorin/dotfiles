@@ -15,6 +15,13 @@ effort=$(echo "$input" | jq -r '.effort.level // empty')
 cached=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 
+# Claude.ai rate limit windows (5-hour + 7-day): usage % and seconds to reset.
+rl=$(echo "$input" | jq -r '
+  [ (.rate_limits.five_hour  // {}) , (.rate_limits.seven_day // {}) ]
+  | map("\((.used_percentage // -1) | round) \((.resets_at // 0) | floor)") | join(" ")')
+set -- $rl
+h5_pct=${1:--1}; h5_reset=${2:-0}; d7_pct=${3:--1}; d7_reset=${4:-0}
+
 # Context fill % computed from the REAL window size (e.g. 1M), so the bar never
 # assumes a fixed 200k. Falls back to the reported percentage only if the token
 # counts or window size are unavailable.
@@ -36,8 +43,32 @@ gray='\033[90m'          # brightBlack: context bar + separators
 brightGreen='\033[92m'   # tokens-cached
 magenta='\033[35m'       # git-branch
 yellow='\033[33m'        # git-changes
+green='\033[32m'         # rate limit ok
+red='\033[31m'           # rate limit high
 
 sep="${gray} | ${reset}"
+
+# --- rate limit windows ------------------------------------------------------
+# "18% 2h13m" — percentage used of the window, plus time until it resets.
+fmt_eta() {
+  awk -v t="$1" -v n="$(date +%s)" 'BEGIN{
+    d = t - n;
+    if (t <= 0 || d <= 0) { print ""; exit }
+    if (d >= 86400) { printf "%dd%dh", int(d/86400), int((d%86400)/3600) }
+    else if (d >= 3600) { printf "%dh%02dm", int(d/3600), int((d%3600)/60) }
+    else { printf "%dm", int(d/60) + (d%60 > 0) }
+  }'
+}
+pct_color() {
+  if [ "$1" -ge 80 ]; then printf '%s' "$red"
+  elif [ "$1" -ge 50 ]; then printf '%s' "$yellow"
+  else printf '%s' "$green"; fi
+}
+limit_widget() {  # label, pct, resets_at
+  [ "$2" -lt 0 ] && return
+  eta=$(fmt_eta "$3")
+  printf '%b%s:%s%%%b%s' "$(pct_color "$2")" "$1" "$2" "$reset" "${eta:+ ${gray}${eta}${reset}}"
+}
 
 # --- context bar (slider style) ----------------------------------------------
 width=10
@@ -91,6 +122,10 @@ out="${out}${sep}${cyan}${model}${reset}"
 [ -n "$effort" ] && out="${out} ${effort}"
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
 out="${out}${sep}${brightGreen}cached:${cached_h}${reset}"
+h5=$(limit_widget 5h "$h5_pct" "$h5_reset")
+d7=$(limit_widget 7d "$d7_pct" "$d7_reset")
+[ -n "$h5" ] && out="${out}${sep}${h5}"
+[ -n "$d7" ] && out="${out}${sep}${d7}"
 if [ -n "$branch" ]; then
   home="$HOME"
   short_cwd=$(echo "$cwd" | sed "s|^$home|~|")
