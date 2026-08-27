@@ -22,6 +22,29 @@ rl=$(echo "$input" | jq -r '
 set -- $rl
 h5_pct=${1:--1}; h5_reset=${2:-0}; d7_pct=${3:--1}; d7_reset=${4:-0}
 
+# Sandbox state. Neither stdin nor the hook payloads expose it, so read
+# sandbox.enabled from the settings chain the way the CLI merges it: managed
+# policy first, then local (what /sandbox writes), project, and user.
+project_dir=$(echo "$input" | jq -r '.workspace.project_dir // .cwd // empty')
+sandbox_enabled=""
+for f in \
+  "/Library/Application Support/ClaudeCode/managed-settings.json" \
+  "${project_dir}/.claude/settings.local.json" \
+  "${project_dir}/.claude/settings.json" \
+  "$HOME/.claude/settings.json"
+do
+  [ -f "$f" ] || continue
+  v=$(jq -r 'if .sandbox.enabled == null then "" else (.sandbox.enabled | tostring) end' "$f" 2>/dev/null)
+  if [ -n "$v" ]; then sandbox_enabled="$v"; break; fi
+done
+[ -n "$CLAUDE_CODE_FORCE_SANDBOX" ] && sandbox_enabled="true"
+
+if [ "$sandbox_enabled" = "true" ]; then
+  sandboxed="sandboxed"
+else
+  sandboxed="unsandboxed"
+fi
+
 # Context fill % computed from the REAL window size (e.g. 1M), so the bar never
 # assumes a fixed 200k. Falls back to the reported percentage only if the token
 # counts or window size are unavailable.
@@ -41,6 +64,8 @@ reset='\033[0m'
 cyan='\033[36m'          # model
 gray='\033[90m'          # brightBlack: context bar + separators
 brightGreen='\033[92m'   # tokens-cached
+green='\033[32m'         # sandbox state: sandboxed
+blue='\033[34m'          # sandbox state: unsandboxed
 magenta='\033[35m'       # git-branch
 yellow='\033[33m'        # git-changes
 green='\033[32m'         # rate limit ok
@@ -120,6 +145,11 @@ sid=$(printf '%s' "$session_id" | cut -c1-8)
 out="${sid}"
 out="${out}${sep}${cyan}${model}${reset}"
 [ -n "$effort" ] && out="${out} ${effort}"
+if [ "$sandbox_enabled" = "true" ]; then
+  out="${out}${sep}${green}${sandboxed}${reset}"
+else
+  out="${out}${sep}${blue}${sandboxed}${reset}"
+fi
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
 out="${out}${sep}${brightGreen}cached:${cached_h}${reset}"
 h5=$(limit_widget 5h "$h5_pct" "$h5_reset")
