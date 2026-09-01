@@ -12,6 +12,12 @@
 	co = checkout
 	coom = !git checkout "origin/$(git defbranch)"
 	coomb = !git checkout "origin/$(git defbranch)" -b
+	# drop the current scratch branch, only if it has no commits of its own
+	coomd = "!f() { b=$(git symbolic-ref --quiet --short HEAD) || { echo 'not on a branch' >&2; return 1; }; \
+      m=\"origin/$(git defbranch)\"; \
+      n=$(git rev-list --count \"$m..$b\" --) || return 1; \
+      test \"$n\" -eq 0 || { echo \"$b has $n commit(s) not in $m, refusing to delete\" >&2; return 1; }; \
+      git checkout \"$m\" && git branch -D \"$b\"; }; f"
 	reb = rebase -i --autosquash
 	rebom = !git rebase -i --autosquash "origin/$(git defbranch)"
 	rebort = rebase --abort
