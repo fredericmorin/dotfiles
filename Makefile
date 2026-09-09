@@ -58,3 +58,32 @@ brew: /opt/homebrew/bin/brew $(BREW_TARGETS)
 .PHONY: check
 check:
 	shellcheck zsh/.zshrc
+
+#####################
+# app preferences
+
+PREFS += eu.exelban.Stats
+PREFS += com.knollsoft.Rectangle
+PREFS += com.stonerl.Thaw
+
+# dump live prefs into the repo as diffable XML
+.PHONY: prefs-save
+prefs-save:
+	@mkdir -p prefs
+	@for d in ${PREFS}; do \
+		defaults export $$d prefs/$$d.plist && \
+		plutil -convert xml1 prefs/$$d.plist && \
+		echo "saved $$d"; \
+	done
+
+# restore repo prefs onto this machine (quit the apps first)
+.PHONY: prefs-load
+prefs-load:
+	@for d in ${PREFS}; do \
+		plutil -lint prefs/$$d.plist >/dev/null || exit 1; \
+	done
+	@for d in ${PREFS}; do \
+		defaults delete $$d >/dev/null 2>&1 || true; \
+		defaults import $$d prefs/$$d.plist && echo "loaded $$d"; \
+	done
+	killall cfprefsd
