@@ -105,3 +105,9 @@ if [[ -n $(find ~/.zcompdump -mmin +1440 2>/dev/null) ]]; then
 else
   compinit -C
 fi
+
+## iTerm2 shell integration (marks, cwd reporting, ...)
+# https://iterm2.com/documentation-shell-integration.html
+# vendored from https://iterm2.com/shell_integration/zsh
+# shellcheck disable=SC1091
+[ -e "$HOME/.iterm2_shell_integration.zsh" ] && source "$HOME/.iterm2_shell_integration.zsh"
