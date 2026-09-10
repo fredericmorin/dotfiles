@@ -76,4 +76,5 @@
     "searchAndCompare": false,
     "launchpad": false
   },
+  "gitlens.mode.active": "review",
 }
