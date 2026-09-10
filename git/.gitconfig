@@ -27,8 +27,8 @@
 	resomh = !git reset --hard "origin/$(git defbranch)"
 	ls = ls-files
 	lsg = !git ls-files | grep -i
-	dom = !git diff "origin/$(git defbranch)"
-	doms = !git diff --stat "origin/$(git defbranch)"
+	dom = !git diff "origin/$(git defbranch)"...
+	doms = !git diff --stat "origin/$(git defbranch)"...
     # commit
 	ci = commit
 	ciaa = commit -a --amend --no-edit
