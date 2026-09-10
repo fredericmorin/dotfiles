@@ -11,6 +11,12 @@ input=$(cat)
 # --- fields from stdin -------------------------------------------------------
 session_id=$(echo "$input" | jq -r '.session_id // empty')
 model=$(echo "$input" | jq -r '.model.display_name // empty' | sed 's/ (\([0-9]*[MK]\) context)/ \1/')
+model_id=$(echo "$input" | jq -r '.model.id // empty')
+# A manually-forced "[1m]" model id suffix means the 1M context window; surface
+# it in the model widget when the display name doesn't already say so.
+case "$model_id" in
+  *"[1m]"*) case "$model" in *1M*) ;; *) model="${model} 1M" ;; esac ;;
+esac
 effort=$(echo "$input" | jq -r '.effort.level // empty')
 cached=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
