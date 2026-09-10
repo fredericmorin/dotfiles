@@ -7,10 +7,12 @@ set -m
 REMOTE=${REMOTE:-origin}
 UPSTREAM=""
 UPSTREAM_SHA=""
+EXEC_CMD=""
 TMPOUT=""
 CURRENT_PID=""
 INTERRUPTED=0
 WIDTH=0
+PROCESSED=0
 names=()
 statuses=()
 details=()
@@ -36,7 +38,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-usage: git-rebase-all-worktrees [-a|--all] [<worktree-path>]
+usage: git-rebase-all-worktrees [-a|--all] [-x <command>] [<worktree-path>]
 
 Put worktrees on top of the remote default branch: fast-forward when they
 are behind, rebase when they have diverged.
@@ -44,7 +46,13 @@ are behind, rebase when they have diverged.
   <worktree-path>   only refresh this worktree (relative or absolute)
   (no argument)     only refresh the worktree holding the current directory
   -a, --all         refresh every worktree of the repository
+  -x, --exec <cmd>  run <cmd> in each worktree that ended up on top of the
+                    default branch
   -h, --help        show this help
+
+The --exec command runs through the shell with the worktree as its working
+directory, once per worktree, and only for worktrees that were left up to
+date, fast-forwarded or rebased.
 
 Dirty worktrees are left alone and a rebase that hits a conflict is aborted.
 This never fetches: run `git fetch` first if the remote-tracking refs are
@@ -65,7 +73,7 @@ on_interrupt() {
     printf '\n%sInterrupted twice, quitting now.%s\n' "$YELLOW" "$RESET"
     if [[ -n $CURRENT_PID ]] && kill -0 "$CURRENT_PID" 2>/dev/null; then
       kill -INT -"$CURRENT_PID" 2>/dev/null
-      printf '%sThe git command in flight was interrupted too; check that %s\n' \
+      printf '%sThe command in flight was interrupted too; check that %s\n' \
         "$YELLOW" "worktree by hand.$RESET"
     fi
     cleanup
@@ -76,11 +84,11 @@ on_interrupt() {
     "$YELLOW" "$RESET"
 }
 
-# Run git in its own process group so a Ctrl+C aimed at this script does not
-# also kill the operation in flight. Output lands in $TMPOUT.
-run_git() {
+# Run a command in its own process group so a Ctrl+C aimed at this script does
+# not also kill the operation in flight. Output lands in $TMPOUT.
+run_cmd() {
   local pid rc
-  git "$@" >"$TMPOUT" 2>&1 &
+  "$@" >"$TMPOUT" 2>&1 &
   pid=$!
   CURRENT_PID=$pid
   while :; do
@@ -90,6 +98,10 @@ run_git() {
   done
   CURRENT_PID=""
   return "$rc"
+}
+
+run_git() {
+  run_cmd git "$@"
 }
 
 default_branch() {
@@ -127,7 +139,7 @@ in_progress() {
 
 status_color() {
   case $1 in
-    "UP TO DATE" | UPDATED | REBASED) printf '%s' "$GREEN" ;;
+    "UP TO DATE" | UPDATED | REBASED | RAN) printf '%s' "$GREEN" ;;
     *) printf '%s' "$YELLOW" ;;
   esac
 }
@@ -245,12 +257,27 @@ update_worktree() {
   record "$name" CONFLICT "$where: $reason"
 }
 
+run_exec() {
+  local wt=$1 name=$2 reason
+
+  row_start "$name" "running: $EXEC_CMD"
+  if run_cmd bash -c 'cd "$1" || exit 1; shift; eval "$@"' _ "$wt" \
+    "$EXEC_CMD"; then
+    record "$name" RAN "$EXEC_CMD"
+    return
+  fi
+
+  reason=$(tail -n 1 "$TMPOUT")
+  [[ -n $reason ]] || reason="no output"
+  record "$name" FAILED "$EXEC_CMD: $reason"
+}
+
 print_summary() {
-  local total=${#names[@]} problems=0 i
+  local total=$PROCESSED problems=0 i
 
   for i in "${!statuses[@]}"; do
     case ${statuses[$i]} in
-      "UP TO DATE" | UPDATED | REBASED) ;;
+      "UP TO DATE" | UPDATED | REBASED | RAN) ;;
       *) problems=$((problems + 1)) ;;
     esac
   done
@@ -267,11 +294,17 @@ print_summary() {
 }
 
 main() {
-  local worktrees=() wt name i=0 total all=0 target=""
+  local worktrees=() wt name i=0 total all=0 target="" last
 
   while (( $# )); do
     case $1 in
       -a | --all) all=1 ;;
+      -x | --exec)
+        [[ $# -ge 2 ]] || die "$1 needs a command"
+        EXEC_CMD=$2
+        shift
+        ;;
+      --exec=*) EXEC_CMD=${1#--exec=} ;;
       -h | --help)
         usage
         return 0
@@ -340,7 +373,16 @@ main() {
       break
     fi
     i=$((i + 1))
+    PROCESSED=$i
     update_worktree "$wt"
+    if [[ -n $EXEC_CMD ]]; then
+      last=${statuses[$((${#statuses[@]} - 1))]}
+      case $last in
+        "UP TO DATE" | UPDATED | REBASED)
+          run_exec "$wt" "$(basename "$wt")"
+          ;;
+      esac
+    fi
   done
 
   print_summary
