@@ -3,12 +3,16 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: spawn.sh <plan.md> [--only 1,3] [-B <base-ref>] [--fork] [--background] [--dry-run]
+usage: spawn.sh <plan.md> [--step N] [--only 1,3] [-B <base-ref>] [--fork] [--background] [--dry-run]
 
-Spawn one Supacode worktree + Claude session per sidecar prompt of a fan-out plan.
-  plan.md       the plan file; sidecars are <plan-stem>_group_<N>_*.md next to it
-  --only        comma-separated group numbers to spawn (default: all)
-  -B, --base    base ref for the worktrees (default: current HEAD)
+Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a fan-out plan.
+  plan.md       the plan file; sidecars are <plan-stem>_step<N>.md (single unit)
+                or <plan-stem>_step<N>_part<M>.md (one part of a parallel group) next to it
+  --step        step number to spawn (default: the lowest step with a sidecar whose branch
+                does not exist yet); steps are sequential, so spawn one step at a time
+  --only        comma-separated part numbers within that step (default: all parts)
+  -B, --base    base ref for the worktrees (default: current HEAD; for step > 1 pass the
+                ref that already contains the previous step, e.g. origin/master)
   --fork        fork the current Claude session into each worktree instead of a fresh one
   --background  create worktrees/tabs without stealing focus
   --dry-run     print what would be spawned and exit
@@ -16,9 +20,10 @@ USAGE
   exit 2
 }
 
-PLAN="" ONLY="" BASE="" FORK=0 DRY=0 BG=()
+PLAN="" STEP="" ONLY="" BASE="" FORK=0 DRY=0 BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --step) STEP="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     -B|--base) BASE="$2"; shift 2 ;;
     --fork) FORK=1; shift ;;
@@ -72,48 +77,70 @@ fi
 rel() { case "$1" in "$REPO_ROOT"/*) echo "${1#"$REPO_ROOT"/}" ;; *) echo "" ;; esac; }
 committed() { [ -n "$1" ] && git cat-file -e "$BASE_SHA:$1" 2>/dev/null; }
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+step_of() { basename "$1" .md | sed -n 's/.*_step\([0-9][0-9]*\)\(_part[0-9][0-9]*\)*$/\1/p'; }
+part_of() { basename "$1" .md | sed -n 's/.*_step[0-9][0-9]*_part\([0-9][0-9]*\)$/\1/p'; }
+branch_of() {
+  local b
+  b=$(sed -n 's/^Branch: *`\([^`]*\)`.*/\1/p' "$1" | head -n 1)
+  [ -n "$b" ] || b="${STEM}_step$(step_of "$1")$(part_of "$1" | sed 's/^./_part&/')"
+  echo "$b"
+}
 
 PLAN_REL=$(rel "$PLAN_ABS")
 PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/fanout-spawn/$STEM"
 mkdir -p "$PROMPT_DIR"
 
 SIDECARS=()
-for f in "$PLAN_DIR/${STEM}"_group_*.md; do [ -f "$f" ] && SIDECARS+=("$f"); done
-[ "${#SIDECARS[@]}" -gt 0 ] || { echo "error: no sidecars matching ${STEM}_group_*.md in $PLAN_DIR" >&2; exit 1; }
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -n "$(step_of "$f")" ] && SIDECARS+=("$f")
+done < <(ls "$PLAN_DIR/${STEM}"_step*.md 2>/dev/null | sort -V)
+[ "${#SIDECARS[@]}" -gt 0 ] || { echo "error: no sidecars matching ${STEM}_step<N>[_part<M>].md in $PLAN_DIR" >&2; exit 1; }
+
+if [ -z "$STEP" ]; then
+  for SC in "${SIDECARS[@]}"; do
+    git show-ref --verify --quiet "refs/heads/$(branch_of "$SC")" && continue
+    STEP=$(step_of "$SC"); break
+  done
+  [ -n "$STEP" ] || { echo "error: every sidecar's branch already exists; pass --step N to respawn one" >&2; exit 1; }
+fi
 
 wanted() {
   [ -z "$ONLY" ] && return 0
   case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
 
-printf '%-6s %-40s %-12s %s\n' GROUP BRANCH ACTION SIDECAR
-FAILED=0
+echo "step: $STEP"
+printf '%-6s %-6s %-40s %-12s %s\n' STEP PART BRANCH ACTION SIDECAR
+FAILED=0 SEEN=0
 for SC in "${SIDECARS[@]}"; do
-  NAME=$(basename "$SC" .md)
-  NUM=$(printf '%s' "$NAME" | sed -n 's/.*_group_\([0-9][0-9]*\).*/\1/p')
-  wanted "$NUM" || continue
-  BRANCH=$(sed -n 's/^Branch: *`\([^`]*\)`.*/\1/p' "$SC" | head -n 1)
-  [ -n "$BRANCH" ] || BRANCH="${STEM}_group_${NUM}"
+  S=$(step_of "$SC"); P=$(part_of "$SC")
+  [ "$S" = "$STEP" ] || continue
+  wanted "${P:-1}" || continue
+  SEEN=1
+  BRANCH=$(branch_of "$SC")
   TITLE=$(sed -n '1s/^# *//p' "$SC")
   if ! grep -q '^## Prompt' "$SC"; then
-    printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "SKIP" "$SC (no '## Prompt' heading)"
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SKIP" "$SC (no '## Prompt' heading)"
     FAILED=1; continue
   fi
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "SKIP" "$SC (branch exists)"
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SKIP" "$SC (branch exists)"
     FAILED=1; continue
   fi
 
   SC_REL=$(rel "$SC")
   PROMPT_FILE="$PROMPT_DIR/$BRANCH.md"
   {
-    echo "You are working one unit of a fan-out plan, on branch \`$BRANCH\` in its own git worktree."
+    echo "You are working one unit of a fan-out plan — step $S${P:+, part $P} — on branch \`$BRANCH\` in its own git worktree."
     echo "Unit: $TITLE"
     if committed "$PLAN_REL" && committed "$SC_REL"; then
       echo "Plan: \`$PLAN_REL\`. This unit's sidecar: \`$SC_REL\`."
     else
       echo "The plan files are not committed on this branch's base, so read them from the source checkout:"
       echo "Plan: \`$PLAN_ABS\`. This unit's sidecar: \`$SC\`."
+    fi
+    if [ -n "$P" ]; then
+      echo "Other parts of step $S run in parallel on their own branches; expect mechanical rebase conflicts in the shared files the plan names."
     fi
     echo
     echo "Follow the prompt below. When the work is done and verified, open the MR with the commit-and-open-mr skill."
@@ -130,22 +157,23 @@ for SC in "${SIDECARS[@]}"; do
   fi
 
   if [ "$DRY" -eq 1 ]; then
-    printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "DRY-RUN" "$SC"
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "DRY-RUN" "$SC"
     continue
   fi
 
   if ! WT_ID=$(supacode repo worktree-new -r "$SUPACODE_REPO_ID" \
       --branch "$BRANCH" --base "$BASE_SHA" --no-upstream ${BG[@]+"${BG[@]}"}) || [ -z "$WT_ID" ]; then
-    printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "FAILED" "worktree-new failed"
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "FAILED" "worktree-new failed"
     FAILED=1; continue
   fi
   WT_PATH=$(printf '%b' "${WT_ID//%/\\x}")
   if ! TAB_ID=$(supacode tab new -w "$WT_ID" -i "$CMD" --title "claude: $BRANCH" ${BG[@]+"${BG[@]}"}); then
-    printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "FAILED" "tab new failed in $WT_PATH"
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "FAILED" "tab new failed in $WT_PATH"
     FAILED=1; continue
   fi
-  printf '%-6s %-40s %-12s %s\n' "$NUM" "$BRANCH" "SPAWNED" "$WT_PATH (tab $TAB_ID)"
+  printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SPAWNED" "$WT_PATH (tab $TAB_ID)"
 done
+[ "$SEEN" -eq 1 ] || { echo "error: no sidecar for step $STEP${ONLY:+ with parts $ONLY}" >&2; exit 1; }
 
 echo
 echo "base: $BASE_SHA${SID:+  (forked from session $SID)}"
