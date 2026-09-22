@@ -4,45 +4,20 @@ description: Spawn one Supacode worktree and one Claude Code session per sidecar
 argument-hint: "<docs/specs/plan.md> [--step N] [--only 1,3] [-B base-ref] [--fork] [--background]"
 ---
 
-# Fan out one step of a reviewed plan into Supacode worktrees
+# Fan out one step of a reviewed plan
 
-`~/.claude/skills/fanout-spawn/spawn.sh` reads a fan-out plan's sidecars
-(`<plan-stem>_step<N>.md` for a single-unit step, `<plan-stem>_step<N>_part<M>.md`
-for each part of a parallel group, each with a `Branch:` line and a `## Prompt`
-section), picks **one step**, and for each sidecar of that step:
+`~/.claude/skills/fanout-spawn/spawn.sh` (flags: `--help`) spawns one step's
+sidecars. For each one it creates a Supacode worktree on the sidecar's branch
+and starts a fresh `claude` session with the sidecar prompt in it. It defaults
+to the lowest step that has not been spawned yet.
 
-1. creates a Supacode worktree on that branch from the base ref
-   (`supacode repo worktree-new`), which runs the repo's Supacode setup script;
-2. opens a tab in that worktree running `claude -n <branch> "<prompt>"`, where
-   the prompt is the sidecar's `## Prompt` body with a short preamble naming the
-   plan, the sidecar, the step and part, the branch, and the instruction to ship
-   via `commit-and-open-mr`.
-
-Steps are sequential: step N+1 is written against the tree after step N merged,
-so only one step is spawned per run. Without `--step` the script picks the lowest
-step that still has an unspawned sidecar. Parts of a step are parallel and all
-spawn together unless `--only` narrows them.
-
-Sessions start fresh by default, because sidecars are written for zero
-context. `--fork` forks the current session into each worktree instead.
-
-## Procedure
-
-1. Run `spawn.sh <plan> --dry-run` (plus any `--step`/`--only`/`-B` the user
-   gave) and show the table: step, part, branch, action, sidecar. `SKIP (branch
-   exists)` rows mean that unit was already spawned or started by hand.
-2. If the chosen step is > 1, the base must already contain the previous step.
-   Check that the previous step's MR(s) merged, then pass `-B origin/master`
-   (after `git fetch`) unless the user gave a base. Say so if it has not merged
-   yet and stop.
-3. If the plan or sidecars are uncommitted, the dry run still works: the
-   preamble then points the sessions at the absolute paths in this checkout.
-   Mention it; committing the plan first is cleaner but not required.
-4. If the user's request already gave the go, run for real immediately with the
-   same flags. Otherwise stop after the dry run and wait for the go.
-5. Report the SPAWNED rows with worktree paths. Each session opens its own MR.
-   The user follows progress in the Supacode sidebar, and comes back with
-   `/fanout-spawn <plan>` for the next step once this one has merged.
-
-Never `git worktree add`, never create branches by hand, never start `claude`
-directly: Supacode must create the worktree so its setup script runs.
+- Dry-run first and show the table. `SKIP` rows are already spawned.
+  Launch for real only once the user has given the go, which may already be
+  in the request.
+- Steps are sequential. Before spawning step N > 1, confirm step N−1's MRs
+  have merged, then use `-B origin/master` after a fetch. If they haven't
+  merged, say so and stop.
+- Uncommitted plans still work, because the sessions get absolute paths.
+- Report the spawned branches and worktree paths. Each session opens its own MR.
+- Only Supacode creates the worktrees, so its setup script runs. Never use
+  `git worktree add`, create branches by hand, or start `claude` directly.
