@@ -106,6 +106,10 @@ else
   compinit -C
 fi
 
+## deja command prediction
+export DEJA_ACCEPT_KEY='^I' DEJA_CYCLE_KEY=
+type deja >/dev/null && eval "$(deja init zsh)"
+
 ## iTerm2 shell integration (marks, cwd reporting, ...)
 # https://iterm2.com/documentation-shell-integration.html
 # vendored from https://iterm2.com/shell_integration/zsh

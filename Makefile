@@ -7,6 +7,7 @@ STOWS += vim
 STOWS += zsh
 STOWS += bins
 STOWS += claude
+STOWS += iTerm2
 
 .PHONY: install
 install:
@@ -48,6 +49,7 @@ $(eval $(call BREW_PACKAGE_TARGET,git))
 $(eval $(call BREW_PACKAGE_TARGET,git-gui))
 $(eval $(call BREW_PACKAGE_TARGET,shellcheck))
 $(eval $(call BREW_PACKAGE_TARGET,uv))
+$(eval $(call BREW_PACKAGE_TARGET,deja))
 $(eval $(call BREW_PACKAGE_TARGET,pyenv))
 $(eval $(call BREW_PACKAGE_TARGET,python@3.14,/opt/homebrew/bin/python3.14))
 $(eval $(call BREW_PACKAGE_TARGET,supacode,/Applications/supacode.app))
