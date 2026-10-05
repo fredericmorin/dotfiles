@@ -37,11 +37,14 @@
 	cp = cherry-pick
 	st = status
     # upstream
+	fp = fetch origin --prune --tags
 	fop = fetch origin --prune --tags --recurse-submodules --jobs 6
 	fopcoom = ! git fop && git coom
+	fc = ! git fop && git coom
 	fopcoomb = ! git fop && git coomb
+	fcb = ! git fop && git coomb
 	foprebom = ! git fop && git rebom
-	fp = fetch origin --prune --tags
+	fr = ! git fop && git rebom
 	subup = submodule update --init --recursive
 	po = push origin
 	pou = ! (git branch --unset-upstream || true) 2>/dev/null && git push --set-upstream --force origin
