@@ -5,7 +5,7 @@ argument-hint: "[branch] [-B base-ref] [-n session-name] [--background] [-- prom
 disable-model-invocation: true
 ---
 
-!`~/.claude/skills/supacode-fork/fork.sh $ARGUMENTS 2>&1`
+!`set -o noglob; ~/.claude/skills/supacode-fork/fork.sh $ARGUMENTS 2>&1`
 
 Relay this in one or two lines: worktree path, branch, new tab, and the
 prompt handed to the fork when there is one. On failure,
