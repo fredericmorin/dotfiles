@@ -3,28 +3,34 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [--background]
+usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [--background] [-- prompt...]
 
 Fork the current Claude Code session into a new Supacode worktree.
   branch        new branch name (default: <current-branch>_fork)
   -B, --base    base ref for the new worktree (default: current HEAD)
   -n, --name    display name for the forked Claude session
   --background  create the worktree/tab without stealing focus
+  -- prompt...  free text sent to the forked session as its first message;
+                any words after the branch are taken as the prompt too
 USAGE
   exit 2
 }
 
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
-BRANCH="" BASE="" NAME="" BG=()
+BRANCH="" BASE="" NAME="" PROMPT="" BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -B|--base) BASE="$2"; shift 2 ;;
     -n|--name) NAME="$2"; shift 2 ;;
     --background) BG=(--background); shift ;;
     -h|--help) usage ;;
+    --) shift; PROMPT="$*"; break ;;
     -*) usage ;;
-    *) [ -z "$BRANCH" ] || usage; BRANCH="$1"; shift ;;
+    *)
+      if [ -z "$BRANCH" ]; then BRANCH="$1"; shift
+      else PROMPT="$*"; break
+      fi ;;
   esac
 done
 
@@ -83,6 +89,7 @@ WT_PATH=$(printf '%b' "${WT_ID//%/\\x}")
 
 CMD="claude --resume $SID --fork-session"
 [ -z "$NAME" ] || CMD="$CMD --name $(shq "$NAME")"
+[ -z "$PROMPT" ] || CMD="$CMD $(shq "$PROMPT")"
 TITLE="claude fork${NAME:+: $NAME}"
 
 TAB_ID=$(supacode tab new -w "$WT_ID" -i "$CMD" --title "$TITLE" ${BG[@]+"${BG[@]}"})
@@ -92,3 +99,4 @@ echo "worktree:       $WT_PATH"
 echo "branch:         $BRANCH (base $BASE)"
 echo "tab:            $TAB_ID"
 echo "command:        $CMD"
+[ -z "$PROMPT" ] || echo "prompt:         $PROMPT"
