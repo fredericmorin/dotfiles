@@ -51,6 +51,8 @@
 	ll = log --oneline --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset'
 	lm = ! git log --oneline --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' "origin/$(git defbranch)"..
 	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --
+	hist = "!f() { git log origin/master --author=\"$(git config user.name)\\\\|$(git config user.email)\" --no-merges --format=\"%ad\" --date=format:\"%Y-%m\" | sort | uniq -c | awk '{bars=\"\"; stars=int(($1+2.5)/5); for(i=1;i<=stars;i++) bars=bars\"*\"; printf \"%s | %-30s (%d)\\n\", $2, bars, $1}'; }; f"
+	histw = "!f() { git log origin/master --author=\"$(git config user.name)\\\\|$(git config user.email)\" --no-merges --format=\"%ad\" --date=format:\"%Y-%W\" | sort | uniq -c | awk '{bars=\"\"; stars=int(($1+2.5)/5); for(i=1;i<=stars;i++) bars=bars\"*\"; printf \"%s | %-30s (%d)\\n\", $2, bars, $1}'; }; f"
 
 [color]
 	ui = true
