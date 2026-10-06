@@ -107,7 +107,8 @@ else
 fi
 
 ## deja command prediction
-export DEJA_ACCEPT_KEY='^I' DEJA_CYCLE_KEY=
+# bin to shift+tab instead of arrow right
+export DEJA_ACCEPT_KEY='^[[Z' DEJA_CYCLE_KEY=
 type deja >/dev/null && eval "$(deja init zsh)"
 
 ## iTerm2 shell integration (marks, cwd reporting, ...)
