@@ -64,6 +64,12 @@ grgd() {
 	fi
 	echo "$gone_branches" | xargs git branch -D
 }
+clspell() {
+  setopt localoptions
+  set -x
+  claude -p --model haiku "Spell check and correct this text. Output only the corrected text, nothing else: $*" | tee >(pbcopy)
+}
+
 # uv tools install path. added first -> lowest priority
 # export path=("$HOME/.local/bin" $path)
 export PATH="$HOME/.local/bin:${PATH}"
