@@ -3,12 +3,14 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [--background] [-- prompt...]
+usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--background] [-- prompt...]
 
 Fork the current Claude Code session into a new Supacode worktree.
   branch        new branch name (default: <current-branch>_fork)
   -B, --base    base ref for the new worktree (default: current HEAD)
   -n, --name    display name for the forked Claude session
+  -s, --same    fork into a new tab of the current worktree instead of a new
+                worktree (no branch or base allowed)
   --background  create the worktree/tab without stealing focus
   -- prompt...  free text sent to the forked session as its first message;
                 any words after the branch are taken as the prompt too
@@ -18,21 +20,27 @@ USAGE
 
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
-BRANCH="" BASE="" NAME="" PROMPT="" BG=()
+BRANCH="" BASE="" NAME="" PROMPT="" SAME="" BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -B|--base) BASE="$2"; shift 2 ;;
     -n|--name) NAME="$2"; shift 2 ;;
+    -s|--same) SAME=1; shift ;;
     --background) BG=(--background); shift ;;
     -h|--help) usage ;;
     --) shift; PROMPT="$*"; break ;;
     -*) usage ;;
     *)
-      if [ -z "$BRANCH" ]; then BRANCH="$1"; shift
+      if [ -z "$BRANCH" ] && [ -z "$SAME" ]; then BRANCH="$1"; shift
       else PROMPT="$*"; break
       fi ;;
   esac
 done
+
+[ -z "$SAME" ] || [ -z "$BASE$BRANCH" ] || {
+  echo "error: --same forks into the current worktree; drop the branch/--base" >&2
+  exit 2
+}
 
 command -v supacode >/dev/null 2>&1 || {
   echo "error: supacode CLI not found; run this inside a Supacode terminal" >&2
@@ -64,6 +72,20 @@ fi
   exit 1
 }
 
+if [ -n "$SAME" ]; then
+  TOP="$(git rev-parse --show-toplevel)/"
+  WT_ID=""
+  while IFS= read -r ID; do
+    if [ "$(printf '%b' "${ID//%/\\x}")" = "$TOP" ]; then WT_ID="$ID"; break; fi
+  done < <(supacode worktree list)
+  [ -n "$WT_ID" ] || {
+    echo "error: no Supacode worktree matches $TOP" >&2
+    exit 1
+  }
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+  BASE=$(git rev-parse HEAD)
+fi
+
 [ -n "$BASE" ] || BASE=$(git rev-parse HEAD)
 if [ -z "$BRANCH" ]; then
   CUR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
@@ -79,7 +101,7 @@ if [ -z "$BRANCH" ]; then
   BRANCH="$CANDIDATE"
 fi
 
-WT_ID=$(supacode repo worktree-new -r "$SUPACODE_REPO_ID" \
+[ -n "$SAME" ] || WT_ID=$(supacode repo worktree-new -r "$SUPACODE_REPO_ID" \
   --branch "$BRANCH" --base "$BASE" --no-upstream ${BG[@]+"${BG[@]}"})
 [ -n "$WT_ID" ] || {
   echo "error: supacode repo worktree-new returned no worktree id" >&2
@@ -96,7 +118,11 @@ TAB_ID=$(supacode tab new -w "$WT_ID" -i "$CMD" --title "$TITLE" ${BG[@]+"${BG[@
 
 echo "forked session: $SID"
 echo "worktree:       $WT_PATH"
-echo "branch:         $BRANCH (base $BASE)"
+if [ -n "$SAME" ]; then
+  echo "branch:         $BRANCH (same worktree)"
+else
+  echo "branch:         $BRANCH (base $BASE)"
+fi
 echo "tab:            $TAB_ID"
 echo "command:        $CMD"
 [ -z "$PROMPT" ] || echo "prompt:         $PROMPT"
