@@ -59,7 +59,7 @@ Standard spec prose, plus:
 
 ## Each sidecar
 
-`/fanout-spawn` parses the filename, the `Branch:` line, and the `## Prompt` heading, so
+`/fanout-run-step` parses the filename, the `Branch:` line, and the `## Prompt` heading, so
 keep this header exact:
 
 ```markdown
@@ -99,5 +99,5 @@ a stop condition as an acceptable outcome.
 ## Finishing
 
 Run the docs lint, check sidecar links resolve, and reread one sidecar as a stranger.
-Report the file list and step table, and tell the user `/fanout-spawn <plan>` launches
+Report the file list and step table, and tell the user `/fanout-run-step <plan>` launches
 one worktree and session per sidecar of the current step once they have reviewed it.

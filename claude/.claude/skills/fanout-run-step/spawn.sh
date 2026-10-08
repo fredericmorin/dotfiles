@@ -15,15 +15,17 @@ Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a
                 ref that already contains the previous step, e.g. origin/master)
   --fork        fork the current Claude session into each worktree instead of a fresh one
   --background  create worktrees/tabs without stealing focus
+  --model       model for the spawned sessions (passed as claude --model, e.g. opus)
   --dry-run     print what would be spawned and exit
 USAGE
   exit 2
 }
 
-PLAN="" STEP="" ONLY="" BASE="" FORK=0 DRY=0 BG=()
+PLAN="" STEP="" ONLY="" BASE="" FORK=0 DRY=0 BG=() MODEL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --step) STEP="$2"; shift 2 ;;
+    --model) MODEL="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     -B|--base) BASE="$2"; shift 2 ;;
     --fork) FORK=1; shift ;;
@@ -87,7 +89,7 @@ branch_of() {
 }
 
 PLAN_REL=$(rel "$PLAN_ABS")
-PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/fanout-spawn/$STEM"
+PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/fanout-run-step/$STEM"
 mkdir -p "$PROMPT_DIR"
 
 SIDECARS=()
@@ -150,10 +152,12 @@ for SC in "${SIDECARS[@]}"; do
     sed -n '/^## Prompt/,$p' "$SC" | sed '1d'
   } > "$PROMPT_FILE"
 
+  MODEL_OPT=""
+  [ -z "$MODEL" ] || MODEL_OPT=" --model $(shq "$MODEL")"
   if [ "$FORK" -eq 1 ]; then
-    CMD="claude --resume $SID --fork-session -n $(shq "$BRANCH") \"\$(cat $(shq "$PROMPT_FILE"))\""
+    CMD="claude --resume $SID --fork-session$MODEL_OPT -n $(shq "$BRANCH") \"\$(cat $(shq "$PROMPT_FILE"))\""
   else
-    CMD="claude -n $(shq "$BRANCH") \"\$(cat $(shq "$PROMPT_FILE"))\""
+    CMD="claude$MODEL_OPT -n $(shq "$BRANCH") \"\$(cat $(shq "$PROMPT_FILE"))\""
   fi
 
   if [ "$DRY" -eq 1 ]; then

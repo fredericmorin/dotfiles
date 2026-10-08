@@ -1,12 +1,12 @@
 ---
-name: fanout-spawn
-description: Spawn one Supacode worktree and one Claude Code session per sidecar prompt of one step of a fan-out plan written with fanout-plan. Use after the user has reviewed the plan and says go, spawn, fan out, or launch the sessions; also for "/fanout-spawn <plan>".
+name: fanout-run-step
+description: Spawn one Supacode worktree and one Claude Code session per sidecar prompt of one step of a fan-out plan written with fanout-plan. Use after the user has reviewed the plan and says go, spawn, fan out, or launch the sessions; also for "/fanout-run-step <plan>".
 argument-hint: "<docs/specs/plan.md> [--step N] [--only 1,3] [-B base-ref] [--fork] [--background]"
 ---
 
 # Fan out one step of a reviewed plan
 
-`~/.claude/skills/fanout-spawn/spawn.sh` (flags: `--help`) spawns one step's
+`~/.claude/skills/fanout-run-step/spawn.sh` (flags: `--help`) spawns one step's
 sidecars. For each one it creates a Supacode worktree on the sidecar's branch
 and starts a fresh `claude` session with the sidecar prompt in it. It defaults
 to the lowest step that has not been spawned yet.
