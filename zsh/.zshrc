@@ -51,7 +51,22 @@ alias mossh='mosh --predict=experimental'
 # shellcheck disable=SC2154
 alias docker-arch-ps='for i in `docker ps --format "{{.Image}}"` ; do docker image inspect $i --format "$i -> {{.Architecture}} : {{.Os}}" ;done'
 alias dops='docker container ls -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
-alias dost='docker stats --no-stream'
+dost() {
+  local stats
+  stats=$(docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}')
+  {
+    printf 'CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS\tCPU %%\tMEM USAGE / LIMIT\n'
+    docker container ls -a --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' |
+      awk -F'\t' -v OFS='\t' '
+        NR == FNR { stats[$1] = $2 OFS $3; next }
+        {
+          sub(/.*\//, "", $3)
+          if ($5 == "") $5 = "-"
+          print $0, stats[$2]
+        }
+      ' <(print -r -- "$stats") -
+  } | column -t -s $'\t'
+}
 pwgen() {
   local length=${1:-"14"}
   cat /dev/urandom | LC_ALL=C tr -dc A-Za-z0-9@~#_- | head -c "$length" && echo
