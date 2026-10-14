@@ -11,6 +11,25 @@ self-contained prompt for a fresh Claude session with zero conversational contex
 that threshold, write one plan with ordered phases and no sidecars. When the gate passes,
 the sidecars are part of the deliverable.
 
+## Session mode
+
+Invoking this skill is the user's request, and approval, to write the spec. That satisfies
+any repo rule to use plan mode for specs, so never call `EnterPlanMode` yourself.
+
+- Not in plan mode: write the files directly.
+- In plan mode: writes are blocked. Shape in the plan file (plan prose, step table, a
+  one-line outline per sidecar: header, branch, scope) and call `ExitPlanMode`. Once
+  approved, write the plan and sidecars to the spec directory without asking again.
+- A plan already exists in the session: reshape it into steps, groups, and parts. Don't
+  re-explore what it already settles.
+
+## Research budget
+
+Write from what the session already knows. Look something up only when a wrong guess
+would change the shape: step boundaries, the part split, shared files. For everything
+else, put the discovery command in the sidecar and let that session run it. Use at most
+one Explore agent, and only for those shape-changing gaps.
+
 ## Vocabulary
 
 Use these terms consistently in the plan, sidecars, filenames, and branches:
@@ -52,6 +71,7 @@ Standard spec prose, plus:
 
 - Where things stand: what already landed, evidence of what is left, linked prior specs.
 - A step table in landing order: step, part, sidecar link, scope, size, difficulty.
+- Under the table, one launch line per step: `/fanout-run-step docs/specs/<plan>.md --step N`.
 - One line per step boundary naming the dependency that forces it.
 - The shared files each group touches.
 - Out of scope, with reasons, including near-misses.
@@ -81,9 +101,10 @@ The prompt must stand alone. Cover:
 - The task, and repo-relative paths to the plan and background specs.
 - Its place in the sequence: for step N > 1, what it waits on and to branch from `master`
   only after that MR merges; for a part, its siblings and the shared files.
-- A worked example to copy, ideally a commit sha.
-- The exact work list (paths, symbols, line numbers flagged as "confirm, they drift") and
-  the command that re-derives it.
+- A worked example to copy: a commit sha when one is known, otherwise the `git log`
+  command that finds it.
+- The work list as precisely as the session knows it, plus the command that re-derives
+  it. The sidecar session confirms paths and line numbers.
 - The shared-file edits, which are the easiest to forget.
 - Hazards found during analysis, and the fallback if one becomes a fight (usually drop
   the item and note it).
@@ -99,5 +120,5 @@ a stop condition as an acceptable outcome.
 ## Finishing
 
 Run the docs lint, check sidecar links resolve, and reread one sidecar as a stranger.
-Report the file list and step table, and tell the user `/fanout-run-step <plan>` launches
-one worktree and session per sidecar of the current step once they have reviewed it.
+Report the file list, the step table, and the per-step launch lines. Each one starts one
+worktree and session per sidecar of that step, once the user has reviewed it.
