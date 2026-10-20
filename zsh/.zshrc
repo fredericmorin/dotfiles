@@ -118,6 +118,7 @@ type direnv >/dev/null && eval "$(direnv hook zsh)"
 ## Load extra stuff if available
 # shellcheck disable=SC1091
 [ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
+# shellcheck disable=SC1091
 [ -e "$HOME/.zshrc.extra" ] && source "$HOME/.zshrc.extra"
 
 autoload -Uz compinit
