@@ -100,9 +100,10 @@ fi
 # dep: brew install direnv
 type direnv >/dev/null && eval "$(direnv hook zsh)"
 
-## Load optional work specific stuff if available
+## Load extra stuff if available
 # shellcheck disable=SC1091
 [ -e "$HOME/.zshrc.work" ] && source "$HOME/.zshrc.work"
+[ -e "$HOME/.zshrc.extra" ] && source "$HOME/.zshrc.extra"
 
 autoload -Uz compinit
 # Regenerate completions dump at most once per day; otherwise load from cache.
