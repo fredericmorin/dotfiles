@@ -337,6 +337,9 @@ main() {
   git rev-parse --git-dir >/dev/null 2>&1 \
     || die "not inside a git repository"
 
+  git fetch origin >/dev/null 2>&1 \
+    || die "failed fetching origin updates"
+
   UPSTREAM=$(default_branch) \
     || die "cannot determine the default branch of $REMOTE"
   UPSTREAM_SHA=$(git rev-parse "$UPSTREAM") || die "cannot resolve $UPSTREAM"
