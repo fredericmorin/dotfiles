@@ -20,6 +20,21 @@ esac
 effort=$(echo "$input" | jq -r '.effort.level // empty')
 cached=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
+transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+
+# Prompt cache TTL countdown: time left since the last API response, using a
+# 1h TTL when that response wrote 1h cache entries, else the default 5m.
+cache_left=""
+if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+  last=$(tail -n 200 "$transcript" | grep '"type":"assistant"' | tail -n 1 | jq -r '
+    [ (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601),
+      (if (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) > 0
+       then 3600 else 300 end) ] | "\(.[0]) \(.[1])"' 2>/dev/null)
+  if [ -n "$last" ]; then
+    cache_left=$(awk -v ts="${last% *}" -v ttl="${last#* }" -v n="$(date +%s)" 'BEGIN{
+      d = ts + ttl - n; if (d < 0) d = 0; printf "%d", d }')
+  fi
+fi
 
 # Claude.ai rate limit windows (5-hour + 7-day): usage % and seconds to reset.
 rl=$(echo "$input" | jq -r '
@@ -158,6 +173,12 @@ else
 fi
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
 out="${out}${sep}${brightGreen}cached:${cached_h}${reset}"
+if [ -n "$cache_left" ]; then
+  if [ "$cache_left" -eq 0 ]; then cc="$red"
+  elif [ "$cache_left" -lt 60 ]; then cc="$yellow"
+  else cc="$green"; fi
+  out="${out} ${cc}$(printf '%d:%02d' $((cache_left / 60)) $((cache_left % 60)))${reset}"
+fi
 h5=$(limit_widget 5h "$h5_pct" "$h5_reset")
 d7=$(limit_widget 7d "$d7_pct" "$d7_reset")
 [ -n "$h5" ] && out="${out}${sep}${h5}"
