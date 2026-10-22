@@ -8,5 +8,5 @@ disable-model-invocation: true
 !`set -o noglob; ~/.claude/skills/supacode-fork/fork.sh $ARGUMENTS 2>&1`
 
 Relay this in one or two lines: worktree path, branch, new tab, and the
-prompt handed to the fork when there is one. On failure,
+prompt file handed to the fork when there is one. On failure,
 quote the error and suggest a fix; don't retry.

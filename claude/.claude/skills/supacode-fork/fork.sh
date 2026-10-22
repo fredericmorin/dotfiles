@@ -111,7 +111,13 @@ WT_PATH=$(printf '%b' "${WT_ID//%/\\x}")
 
 CMD="claude --resume $SID --fork-session"
 [ -z "$NAME" ] || CMD="$CMD --name $(shq "$NAME")"
-[ -z "$PROMPT" ] || CMD="$CMD $(shq "$PROMPT")"
+if [ -n "$PROMPT" ]; then
+  PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/supacode-fork"
+  mkdir -p "$PROMPT_DIR"
+  PROMPT_FILE="$PROMPT_DIR/${BRANCH//\//_}_$(date +%Y%m%d_%H%M%S).md"
+  printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
+  CMD="$CMD \"\$(cat $(shq "$PROMPT_FILE"))\""
+fi
 TITLE="claude fork${NAME:+: $NAME}"
 
 TAB_ID=$(supacode tab new -w "$WT_ID" -i "$CMD" --title "$TITLE" ${BG[@]+"${BG[@]}"})
@@ -125,4 +131,4 @@ else
 fi
 echo "tab:            $TAB_ID"
 echo "command:        $CMD"
-[ -z "$PROMPT" ] || echo "prompt:         $PROMPT"
+[ -z "$PROMPT" ] || echo "prompt file:    $PROMPT_FILE"
