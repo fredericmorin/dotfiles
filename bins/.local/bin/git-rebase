@@ -7,7 +7,7 @@ set -m
 REMOTE=${REMOTE:-origin}
 UPSTREAM=""
 UPSTREAM_SHA=""
-EXEC_CMD=""
+EXEC_CMDS=()
 TMPOUT=""
 CURRENT_PID=""
 INTERRUPTED=0
@@ -38,7 +38,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-usage: git-rebase-all-worktrees [-a|--all] [-x <command>] [<worktree-path>]
+usage: git-rebase [-a|--all] [-x <command>]... [<worktree-path>]
 
 Put worktrees on top of the remote default branch: fast-forward when they
 are behind, rebase when they have diverged.
@@ -47,12 +47,13 @@ are behind, rebase when they have diverged.
   (no argument)     only refresh the worktree holding the current directory
   -a, --all         refresh every worktree of the repository
   -x, --exec <cmd>  run <cmd> in each worktree that ended up on top of the
-                    default branch
+                    default branch; repeat to run several commands in order
   -h, --help        show this help
 
-The --exec command runs through the shell with the worktree as its working
+The --exec commands run through the shell with the worktree as their working
 directory, once per worktree, and only for worktrees that were left up to
-date, fast-forwarded or rebased.
+date, fast-forwarded or rebased. They run in the order given, and a failing
+command skips the remaining ones for that worktree.
 
 Dirty worktrees are left alone and a rebase that hits a conflict is aborted.
 This never fetches: run `git fetch` first if the remote-tracking refs are
@@ -258,18 +259,19 @@ update_worktree() {
 }
 
 run_exec() {
-  local wt=$1 name=$2 reason
+  local wt=$1 name=$2 cmd=$3 reason
 
-  row_start "$name" "running: $EXEC_CMD"
+  row_start "$name" "running: $cmd"
   if run_cmd bash -c 'cd "$1" || exit 1; shift; eval "$@"' _ "$wt" \
-    "$EXEC_CMD"; then
-    record "$name" RAN "$EXEC_CMD"
+    "$cmd"; then
+    record "$name" RAN "$cmd"
     return
   fi
 
   reason=$(tail -n 1 "$TMPOUT")
   [[ -n $reason ]] || reason="no output"
-  record "$name" FAILED "$EXEC_CMD: $reason"
+  record "$name" FAILED "$cmd: $reason"
+  return 1
 }
 
 print_summary() {
@@ -294,17 +296,17 @@ print_summary() {
 }
 
 main() {
-  local worktrees=() wt name i=0 total all=0 target="" last
+  local worktrees=() wt name i=0 total all=0 target="" last cmd
 
   while (( $# )); do
     case $1 in
       -a | --all) all=1 ;;
       -x | --exec)
         [[ $# -ge 2 ]] || die "$1 needs a command"
-        EXEC_CMD=$2
+        EXEC_CMDS+=("$2")
         shift
         ;;
-      --exec=*) EXEC_CMD=${1#--exec=} ;;
+      --exec=*) EXEC_CMDS+=("${1#--exec=}") ;;
       -h | --help)
         usage
         return 0
@@ -378,11 +380,13 @@ main() {
     i=$((i + 1))
     PROCESSED=$i
     update_worktree "$wt"
-    if [[ -n $EXEC_CMD ]]; then
+    if (( ${#EXEC_CMDS[@]} )); then
       last=${statuses[$((${#statuses[@]} - 1))]}
       case $last in
         "UP TO DATE" | UPDATED | REBASED)
-          run_exec "$wt" "$(basename "$wt")"
+          for cmd in "${EXEC_CMDS[@]}"; do
+            run_exec "$wt" "$(basename "$wt")" "$cmd" || break
+          done
           ;;
       esac
     fi
