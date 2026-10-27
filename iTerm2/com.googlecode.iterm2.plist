@@ -358,7 +358,7 @@ Marks and Annotations.Previous Mark</string>
 			<key>Version</key>
 			<integer>2</integer>
 		</dict>
-		<key>0xf700-0x320000-0x7e</key>
+		<key>0xf700-0x320000-0x7e-0x1</key>
 		<dict>
 			<key>Action</key>
 			<integer>25</integer>
