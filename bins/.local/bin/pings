@@ -1,180 +1,1013 @@
-#!/usr/bin/env bash
-# ─────────────────────────────────────────────
-#  pingmon.sh  –  Ping multiple hosts every 0.5s
-#  Usage: ./pingmon.sh <ip1> <ip2> [ip3 ...]
-# ─────────────────────────────────────────────
+#!/usr/bin/env python3
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIREMENTS: keep every point below true when changing this script, and
+# re-test the ones your change could touch.
+#
+# Platform
+#   - Runs on macOS's built-in /usr/bin/python3 (3.9): no match statements, no
+#     `X | Y` type hints, no other 3.10+ features. Also runs on Linux.
+#   - Standard library only. No third-party packages, no curl.
+#   - socket.timeout is not TimeoutError on 3.9: catch socket.timeout.
+#
+# Targets (each argument becomes one row, in the order given)
+#   - HOST / icmp://HOST: ping (ping6 for IPv6 on macOS), run with -n and LC_ALL=C,
+#     killed at the timeout (ping -W means ms on macOS and seconds on Linux).
+#     Accepts [::1] and link-local addresses with a zone (fe80::1%en0); the zone must reach ping.
+#   - ts://NAME: tailscale ping -c 1 --until-direct=false --timeout=...; the
+#     CLI is found on PATH or in /Applications/Tailscale.app (often only a shell
+#     alias). NAME is resolved once at startup; an unknown name stops with the CLI's error.
+#     VIA shows only the kind of link, never peer endpoints: "direct" or "peer-relay"
+#     (green), DERP(region) or any unrecognised value exactly as printed (yellow).
+#     Only an IP:port endpoint is labelled direct.
+#   - tcp://HOST:PORT: connect time only (DNS excluded). Refused is ERR.
+#   - http[s]://...: urllib, no proxies, redirects followed, timed until the
+#     final headers; 2xx is UP, other codes are ERR "HTTP nnn". Bad ports are
+#     rejected at startup; a non-ASCII path and query are percent-encoded.
+#     Captive-portal signs are orange:
+#       CERT  = certificate failed verification, note wrong host / self-signed /
+#               unknown CA / expired / not yet valid (other TLS failures stay ERR);
+#       REDIR = redirected to another site, note "→ host". Same host (http → https)
+#               or a subdomain either way (example.com ↔ www.example.com) is not a
+#               redirect; hosts are compared IDNA-encoded.
+#   - dns://NAME: system resolver. dns://NAME@SERVER[:PORT] (IPv6 server in
+#     [brackets]): hand-built UDP A query; ignores replies with the wrong ID,
+#     reads the first A record (also after a CNAME), shows NXDOMAIN and other
+#     error codes as ERR, handles the root name ".", and turns any malformed or
+#     cut-off reply into ERR "bad reply" (never an exception).
+#   - IPv4 shorthand on bare targets: 10.0.0.1,2,3 / 10.0.0.1-3 / 10.0.0.1,5-7,
+#     in any octet. Plain IPs stay exactly as typed (leading zeros mean octal to
+#     ping); hostnames with "-" are untouched; reversed ranges, octets above 255 and
+#     more than MAX_EXPANSION addresses are rejected at startup.
+#   - Every invalid argument fails at startup with "pings: error: ARG: reason".
+#
+# Probing and timing
+#   - One shared clock: every target is probed at the start of every interval,
+#     even if its previous probe hasn't finished. Each result goes into the slot
+#     it was sent in, so a history column is the same moment on every row.
+#     A slow target must never lag behind the others.
+#   - Status/RTT show the newest finished slot; a late older result never replaces it.
+#   - Missed slots (machine slept) stay empty; no catch-up burst.
+#   - A probe never raises out of its thread; errors become ERR with a short note.
+#   - Name lookup failures: DNS "no such host" only for a name that really doesn't exist,
+#     otherwise the resolver's message.
+#   - Quitting never waits for running probes (daemon threads).
+#
+# Display
+#   - Redraw the whole frame from the top of the screen; never move the cursor
+#     relative to the previous frame.
+#   - Columns: TARGET, ADDRESS (only for names, hidden if all are IPs; keeps an
+#     IPv6 zone), STATUS, RTT (or the failure reason), VIA (only once a Tailscale
+#     target has reported a path), UPTIME, HISTORY. All rows line up.
+#   - Pad by visible width, never by bytes or with colour codes counted:
+#     UTF-8 everywhere, wide characters count 2, marks/zero-width/format characters 0.
+#   - Control characters from argv or error text are shown as "?" (no terminal injection).
+#   - Lines are cut to the terminal width and the frame to its height
+#     (footer kept, hidden rows counted); nothing may wrap or scroll.
+#   - History: green ▪ UP, orange ▫ CERT or REDIR, red ▫ other not UP,
+#     yellow · in flight, dim · no sample.
+#   - Refuses to run when stdout isn't a terminal.
+#   - Ctrl-C exits 130, SIGTERM exits 143; both restore the cursor.
+#
+# Testing (no live network needed)
+#   - Import the script with importlib.machinery.SourceFileLoader, then
+#     monkeypatch subprocess.run / socket.socket to fake ping, tailscale and DNS
+#     replies.
+#   - Check the screen by calling render() with os.terminal_size, or run main()
+#     with sys.stdout.isatty and shutil.get_terminal_size patched.
+#   - Check alignment with fake probes of different speeds sharing one outage:
+#     the red marks must fall in the same columns on every row.
+#   - Run with /usr/bin/python3 -I.
+# ─────────────────────────────────────────────────────────────────────────────
+"""pings - monitor several targets at once with ICMP, Tailscale, TCP, HTTP(S) or DNS probes."""
 
-set -uo pipefail
+import argparse
+import functools
+import ipaddress
+import itertools
+import os
+import random
+import re
+import shutil
+import signal
+import socket
+import ssl
+import struct
+import subprocess
+import sys
+import threading
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
-# ── Validate arguments ───────────────────────────────────────────────────────
-if [[ $# -eq 0 ]]; then
-  echo "Usage: $0 <ip1> <ip2> [ip3 ...]"
-  exit 1
-fi
+EPILOG = """\
+targets:
+  HOST                      ICMP echo via ping (ping6 for IPv6 on macOS)
+  icmp://HOST               same as above
+  ts://NAME                 `tailscale ping` to NAME; shows whether the path is direct, DERP or a peer relay
+  tcp://HOST:PORT           time to open a TCP connection (good when ICMP is blocked)
+  http[s]://HOST[:PORT]/... time until the final response headers (redirects are followed,
+                            proxies are not used); 2xx is UP. Captive-portal signs: CERT for
+                            a bad certificate, REDIR for a redirect to another site
+  dns://NAME                resolve NAME with the system resolver (mostly measures its cache)
+  dns://NAME@SERVER[:PORT]  send an A query for NAME straight to SERVER over UDP
 
-HOSTS=("$@")
-INTERVAL=0.5      # seconds between full sweeps
-TIMEOUT_MS=400    # ping deadline in milliseconds
-HISTORY=20        # number of ticks kept per host
+IPv4 shorthand (any octet, bare HOST targets only):
+  10.32.1.1,2,3             10.32.1.1 10.32.1.2 10.32.1.3
+  10.32.1.1-3               10.32.1.1 10.32.1.2 10.32.1.3
+  10.32.1.1,5-7             10.32.1.1 10.32.1.5 10.32.1.6 10.32.1.7
 
-# ── Temp dir for parallel ping results ───────────────────────────────────────
-PING_TMPDIR=$(mktemp -d)
-cleanup() {
-  tput cnorm 2>/dev/null || true
-  rm -rf "$PING_TMPDIR"
-  echo
-  exit 0
+examples:
+  pings 1.1.1.1 router.local
+  pings 10.32.1.1,5-7
+  pings tcp://github.com:443 https://example.com dns://example.com@8.8.8.8
+"""
+
+# Probe outcomes
+UP = "UP"
+DOWN = "DOWN"
+DNS_ERR = "DNS"
+ERR = "ERR"
+# Captive-portal signs (http/https only)
+CERT = "CERT"
+REDIR = "REDIR"
+
+
+
+class Result(NamedTuple):
+    status: str
+    rtt: Optional[float]  # ms
+    note: str  # why it isn't UP
+    address: str  # resolved address, or ""
+    via: str = ""  # Tailscale link kind: "direct", "peer-relay" or "DERP(nyc)"
+
+
+RESET = "\033[0m"
+DIM = "\033[2m"
+GREEN = "\033[38;5;82m"
+RED = "\033[38;5;196m"
+YELLOW = "\033[38;5;220m"
+ORANGE = "\033[38;5;208m"
+GREY = "\033[38;5;240m"
+
+HOME = "\033[H"
+CLEAR_SCREEN = "\033[2J"
+CLEAR_EOL = "\033[K"
+CLEAR_EOS = "\033[J"
+HIDE_CURSOR = "\033[?25l"
+SHOW_CURSOR = "\033[?25h"
+
+STATUS_TEXT = {
+    None: ("? WAIT", YELLOW),
+    UP: ("● UP", GREEN),
+    DOWN: ("○ DOWN", RED),
+    DNS_ERR: ("✕ DNS", RED),
+    ERR: ("✕ ERR", RED),
+    CERT: ("✕ CERT", ORANGE),
+    REDIR: ("✕ REDIR", ORANGE),
 }
-trap cleanup INT TERM EXIT
 
-# ── Colours & symbols ────────────────────────────────────────────────────────
-C_RESET='\033[0m'
-C_BOLD='\033[1m'
-C_DIM='\033[2m'
-C_GREEN='\033[38;5;82m'
-C_RED='\033[38;5;196m'
-C_YELLOW='\033[38;5;220m'
-C_CYAN='\033[38;5;87m'
-C_HEADER='\033[38;5;240m'
+PING6 = shutil.which("ping6")
+# Where the macOS app keeps its CLI when `tailscale` isn't on PATH (often it's only a shell alias).
+TAILSCALE_APP_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+# e.g. "pong from ingress (100.80.147.33) via DERP(nyc) in 25ms"; the parentheses may also hold ", PORT".
+TS_PONG_RE = re.compile(r"^pong from \S+ \(([^,)]+)[^)]*\) via (\S+) in (\S+)$", re.M)
+# A direct UDP path: IPv4:port or [IPv6]:port.
+TS_ENDPOINT_RE = re.compile(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9A-Fa-f:.]+(%[^\]]+)?\]):\d+")
+# tailscale's error lines start with a Go log timestamp, e.g. "2026/11/01 00:02:32 no reply".
+TS_LOG_PREFIX_RE = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} ")
+GO_DURATION_RE = re.compile(r"([\d.]+)(ns|us|µs|ms|s|m|h)")
+GO_DURATION_MS = {"ns": 1e-6, "us": 1e-3, "µs": 1e-3, "ms": 1.0, "s": 1000.0, "m": 60000.0, "h": 3600000.0}
+PING_RTT_RE = re.compile(r"time[=<]\s*([\d.]+)")
+# Untranslated ping output, so PING_RTT_RE matches.
+PING_ENV = dict(os.environ, LC_ALL="C")
 
-SYM_UP='●'
-SYM_DOWN='○'
-SYM_HIST_UP='▪'
-SYM_HIST_DOWN='▫'
+# Connect straight to the target: a proxy would make RTT and status describe the proxy.
+HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+# Characters left as-is when percent-encoding a URL's path and query.
+URL_SAFE = "!#$%&'()*+,/:;=?@[]~"
 
-# ── Ping one host; write "UP <rtt>" or "DOWN" to a file ──────────────────────
-ping_once() {
-  local host="$1" outfile="$2"
-  local output rtt
-  if output=$(fping -c1 -t$TIMEOUT_MS "$host" 2>/dev/null); then
-    rtt=$(echo "$output" | head -n1 | grep -oE '([0-9.]+) ms' | cut -d' ' -f1)
-  # if output=$(ping -c 1 -W "$TIMEOUT_MS" "$host" 2>/dev/null); then
-  #   rtt=$(echo "$output" | grep -oE 'time[=<][0-9.]+' | grep -oE '[0-9.]+' | head -1)
-    echo "UP ${rtt:-?}" > "$outfile"
-  else
-    echo "DOWN" > "$outfile"
-  fi
+# One IPv4 octet in shorthand form: numbers and ranges separated by commas, e.g. 1,5-7.
+OCTET_SPEC_RE = re.compile(r"\d+(-\d+)?(,\d+(-\d+)?)*")
+# Each target is a thread and a screen row, so refuse expansions that are surely a typo.
+MAX_EXPANSION = 256
+
+NO_SUCH_HOST_ERRORS = {socket.EAI_NONAME, getattr(socket, "EAI_NODATA", socket.EAI_NONAME)}
+
+
+def elapsed_ms(start: float) -> float:
+    return (time.monotonic() - start) * 1000.0
+
+
+def resolve(host: str, port: Optional[int], socktype: int) -> Tuple[int, tuple]:
+    """Return (family, sockaddr) of the first address for host; raises socket.gaierror."""
+    family, _, _, _, sockaddr = socket.getaddrinfo(host, port, type=socktype)[0]
+    return family, sockaddr
+
+
+def sockaddr_host(sockaddr: tuple) -> str:
+    """Return the numeric host of a sockaddr, keeping an IPv6 zone such as %en0."""
+    return socket.getnameinfo(sockaddr, socket.NI_NUMERICHOST)[0]
+
+
+def lookup_error(e: socket.gaierror) -> str:
+    if e.errno in NO_SUCH_HOST_ERRORS:
+        return "no such host"
+    return e.strerror or "lookup failed"
+
+
+# ── Probes ───────────────────────────────────────────────────────────────────
+# Name resolution uses getaddrinfo, which has no timeout: a hung resolver stalls
+# only that target's thread, and the row simply stops updating until it returns.
+
+
+def probe_icmp(host: str, timeout: float) -> Result:
+    address = ""
+    try:
+        family, sockaddr = resolve(host, None, socket.SOCK_DGRAM)
+    except socket.gaierror as e:
+        return DNS_ERR, None, lookup_error(e), address
+    ip = sockaddr_host(sockaddr)
+    address = ip
+    # macOS ping only does IPv4; Linux ping handles both.
+    cmd = "ping"
+    if family == socket.AF_INET6 and PING6:
+        cmd = PING6
+    # No ping -W flag: its unit differs between macOS (ms) and Linux (s), so kill on timeout instead.
+    try:
+        proc = subprocess.run(
+            [cmd, "-n", "-c1", ip],
+            capture_output=True,
+            env=PING_ENV,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return DOWN, None, "timeout", address
+    if proc.returncode == 0:
+        match = PING_RTT_RE.search(proc.stdout)
+        rtt = float(match.group(1)) if match else None
+        return UP, rtt, "", address
+    error = proc.stderr.strip().splitlines()
+    if error:
+        return ERR, None, error[0], address
+    return DOWN, None, "no reply", address
+
+
+def go_duration_ms(text: str) -> Optional[float]:
+    """Parse a Go duration such as 3ms, 1.5s or 250µs into ms; None if it isn't one."""
+    parts = GO_DURATION_RE.findall(text)
+    if not parts or "".join(number + unit for number, unit in parts) != text:
+        return None
+    return sum(float(number) * GO_DURATION_MS[unit] for number, unit in parts)
+
+
+def tailscale_lines(text: str) -> List[str]:
+    """Non-empty output lines without log timestamps or the client/server version warning."""
+    lines = []
+    for line in text.splitlines():
+        line = TS_LOG_PREFIX_RE.sub("", line.strip())
+        if line and not line.startswith("Warning: client version"):
+            lines.append(line)
+    return lines
+
+
+def tailscale_link(via: str) -> str:
+    """Reduce tailscale's "via" text to the kind of link: direct, peer-relay, DERP(region), ..."""
+    if via.startswith("peer-relay("):
+        return "peer-relay"  # the relay's endpoint and VNI are noise here
+    if TS_ENDPOINT_RE.fullmatch(via):
+        return "direct"  # the peer's endpoint is noise here too
+    # DERP(region), DERP() for a region missing from the map, or a ping-type fallback such as "disco".
+    return via
+
+
+def probe_tailscale(cli: str, ip: str, timeout: float) -> Result:
+    # Disco ping through tailscaled: answers even when the peer's firewall drops ICMP.
+    # Output formats are from tailscale 1.104 (cmd/tailscale/cli/ping.go), checked against the real CLI.
+    address = ip
+    timeout_ms = max(1, round(timeout * 1000))
+    cmd = [cli, "ping", "-c", "1", "--until-direct=false", "--timeout=%dms" % timeout_ms, ip]
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=True, errors="replace") as proc:
+        # Backstop only; the CLI enforces --timeout itself but takes a moment to start.
+        backstop = threading.Timer(timeout + 5, proc.kill)
+        backstop.start()
+        try:
+            stdout = ""
+            for line in proc.stdout:
+                stdout += line
+                match = TS_PONG_RE.match(line.rstrip("\n"))
+                if match:
+                    # After a reply the CLI sleeps 1 s before exiting; don't wait for it.
+                    proc.kill()
+                    # tailscale rounds to whole ms, so a LAN peer may show 0.0 ms.
+                    return UP, go_duration_ms(match.group(3)), "", match.group(1), tailscale_link(match.group(2))
+            stderr = proc.stderr.read()
+            returncode = proc.wait()
+        finally:
+            backstop.cancel()
+
+    out_lines = tailscale_lines(stdout)
+    err_lines = tailscale_lines(stderr)
+    if returncode < 0:
+        return DOWN, None, "timeout", address  # killed by the backstop
+    if returncode == 0 and any(line.endswith("is local Tailscale IP") for line in out_lines):
+        return UP, None, "", address, "local"
+    # A timeout prints 'ping "IP" timed out' on stdout and "no reply" on stderr.
+    if any(line.endswith("timed out") or line == "no reply" for line in out_lines + err_lines):
+        return DOWN, None, "no reply", address
+    # Errors go to stderr; "Tailscale is stopped." / "Logged out." go to stdout.
+    lines = err_lines + out_lines
+    if lines:
+        return ERR, None, lines[0], address
+    return ERR, None, "exit %d" % returncode, address
+
+
+def probe_tcp(host: str, port: int, timeout: float) -> Result:
+    address = ""
+    try:
+        family, sockaddr = resolve(host, port, socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return DNS_ERR, None, lookup_error(e), address
+    address = sockaddr_host(sockaddr)
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    start = time.monotonic()
+    try:
+        sock.connect(sockaddr)
+        rtt = elapsed_ms(start)
+    except socket.timeout:
+        return DOWN, None, "timeout", address
+    except ConnectionRefusedError:
+        return ERR, None, "refused", address
+    except OSError as e:
+        return DOWN, None, e.strerror or type(e).__name__, address
+    finally:
+        sock.close()
+    return UP, rtt, "", address
+
+
+# OpenSSL/LibreSSL X509_V_ERR_* codes, checked against LibreSSL 2.8.3.
+CERT_PROBLEMS = {
+    62: "wrong host",  # the usual captive-portal case
+    18: "self-signed",  # the site's own certificate is self-signed
+    19: "unknown CA",  # chain ends in a root the server sent itself but we don't trust
+    2: "unknown CA",
+    20: "unknown CA",
+    21: "unknown CA",
+    10: "expired",
+    9: "not yet valid",  # also what a wrong clock looks like
 }
 
-# ── Sanitise a host string into a safe filename ───────────────────────────────
-safe_name() { echo "$1" | tr -cs 'a-zA-Z0-9._-' '_'; }
 
-# ── State arrays ─────────────────────────────────────────────────────────────
-declare -A status rtt history up_count total_count
+def cert_problem(err: ssl.SSLCertVerificationError) -> str:
+    return CERT_PROBLEMS.get(err.verify_code) or err.verify_message or "invalid cert"
 
-for h in "${HOSTS[@]}"; do
-  status[$h]="?"
-  rtt[$h]="?"
-  history[$h]=""
-  up_count[$h]=0
-  total_count[$h]=0
-done
 
-# ── Draw a mini history sparkline ─────────────────────────────────────────────
-draw_bar() {
-  local hist="$1" bar="" len=0 bit
-  for bit in $hist; do
-    [[ "$bit" == "1" ]] \
-      && bar+="${C_GREEN}${SYM_HIST_UP}${C_RESET}" \
-      || bar+="${C_RED}${SYM_HIST_DOWN}${C_RESET}"
-    (( len++ )) || true
-  done
-  local i
-  for (( i=len; i<HISTORY; i++ )); do bar+="${C_DIM}·${C_RESET}"; done
-  echo -ne "$bar"
-}
+def idna_host(host: str) -> str:
+    try:
+        return host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return host.lower()
 
-# ── Static header ─────────────────────────────────────────────────────────────
-print_header() {
-  echo -e "${C_BOLD}${C_CYAN}  ██████╗ ██╗███╗   ██╗ ██████╗ ███╗   ███╗ ██████╗ ███╗   ██╗${C_RESET}"
-  echo -e "${C_BOLD}${C_CYAN}  ██╔══██╗██║████╗  ██║██╔════╝ ████╗ ████║██╔═══██╗████╗  ██║${C_RESET}"
-  echo -e "${C_BOLD}${C_CYAN}  ██████╔╝██║██╔██╗ ██║██║  ███╗██╔████╔██║██║   ██║██╔██╗ ██║${C_RESET}"
-  echo -e "${C_BOLD}${C_CYAN}  ██╔═══╝ ██║██║╚██╗██║██║   ██║██║╚██╔╝██║██║   ██║██║╚██╗██║${C_RESET}"
-  echo -e "${C_BOLD}${C_CYAN}  ██║     ██║██║ ╚████║╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║ ╚████║${C_RESET}"
-  echo -e "${C_BOLD}${C_CYAN}  ╚═╝     ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝${C_RESET}"
-  echo
-  printf "  ${C_HEADER}%-22s  %-7s  %-11s  %-8s  %s${C_RESET}\n" \
-    "HOST" "STATUS" "RTT" "UPTIME" "HISTORY (last ${HISTORY})"
-  printf "  ${C_DIM}%s${C_RESET}\n" \
-    "────────────────────────────────────────────────────────────────────────"
-}
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
-NLINES=$(( ${#HOSTS[@]} + 2 ))
-first_draw=true
-tput civis 2>/dev/null || true
+def same_site(requested: str, final: str) -> bool:
+    """True if the hosts are equal or one is a subdomain of the other (example.com, www.example.com)."""
+    a = idna_host(requested).rstrip(".")
+    b = idna_host(final).rstrip(".")
+    return a == b or a.endswith("." + b) or b.endswith("." + a)
 
-while true; do
-  # Launch all pings in parallel; each writes its result to a temp file
-  for h in "${HOSTS[@]}"; do
-    ping_once "$h" "${PING_TMPDIR}/$(safe_name "$h")" &
-  done
-  wait   # block until every ping subprocess finishes
 
-  # Read results back from temp files
-  for h in "${HOSTS[@]}"; do
-    tmpfile="${PING_TMPDIR}/$(safe_name "$h")"
-    result=$( [[ -f "$tmpfile" ]] && cat "$tmpfile" || echo "DOWN" )
+def redirect_note(requested: str, final_url: str) -> str:
+    """Return "→ host" if final_url left the requested site, else ""."""
+    final = urllib.parse.urlsplit(final_url).hostname or ""
+    if same_site(requested, final):
+        return ""
+    return "→ " + final
 
-    (( total_count[$h]++ )) || true
 
-    if [[ "$result" == UP* ]]; then
-      status[$h]="UP"
-      rtt[$h]=$(awk '{print $2}' <<< "$result")
-      (( up_count[$h]++ )) || true
-      history[$h]+=" 1"
-    else
-      status[$h]="DOWN"
-      rtt[$h]="—"
-      history[$h]+=" 0"
-    fi
+def probe_http(url: str, timeout: float) -> Result:
+    # urllib doesn't expose the address it connected to, so look it up separately (served from the resolver cache).
+    parts = urllib.parse.urlsplit(url)
+    try:
+        address = sockaddr_host(resolve(parts.hostname, parts.port, socket.SOCK_STREAM)[1])
+    except socket.gaierror:
+        address = ""
+    request = urllib.request.Request(url, headers={"User-Agent": "pings"})
+    start = time.monotonic()
+    try:
+        # Timed until the final headers arrive; includes DNS, TCP, TLS, server time and any redirects.
+        with HTTP_OPENER.open(request, timeout=timeout) as response:
+            rtt = elapsed_ms(start)
+            redirected = redirect_note(parts.hostname, response.geturl())
+    except urllib.error.HTTPError as e:
+        e.close()
+        # A portal's login page may answer with an error code after redirecting.
+        redirected = redirect_note(parts.hostname, e.geturl())
+        if redirected:
+            return REDIR, None, redirected, address
+        return ERR, None, "HTTP %d" % e.code, address
+    except urllib.error.URLError as e:
+        reason = e.reason
+        if isinstance(reason, socket.gaierror):
+            return DNS_ERR, None, lookup_error(reason), address
+        if isinstance(reason, socket.timeout):
+            return DOWN, None, "timeout", address
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return CERT, None, cert_problem(reason), address
+        if isinstance(reason, ssl.SSLError):
+            return ERR, None, "TLS: " + (getattr(reason, "reason", None) or str(reason)), address
+        if isinstance(reason, ConnectionRefusedError):
+            return ERR, None, "refused", address
+        if isinstance(reason, OSError):
+            return DOWN, None, reason.strerror or type(reason).__name__, address
+        return ERR, None, str(reason), address
+    except socket.timeout:
+        return DOWN, None, "timeout", address
+    except ssl.SSLCertVerificationError as e:
+        return CERT, None, cert_problem(e), address
+    except OSError as e:
+        return DOWN, None, e.strerror or type(e).__name__, address
+    if redirected:
+        return REDIR, None, redirected, address
+    return UP, rtt, "", address
 
-    # Trim history to HISTORY entries
-    local_hist=( ${history[$h]} )
-    if (( ${#local_hist[@]} > HISTORY )); then
-      history[$h]="${local_hist[*]: -${HISTORY}}"
-    fi
-  done
 
-  # Draw / redraw
-  if $first_draw; then
-    clear; print_header; first_draw=false
-  else
-    local i
-    for (( i=0; i<NLINES; i++ )); do tput cuu1 2>/dev/null; done
-  fi
+def probe_dns_system(name: str, timeout: float) -> Result:
+    address = ""
+    start = time.monotonic()
+    try:
+        address = sockaddr_host(resolve(name, None, socket.SOCK_STREAM)[1])
+    except socket.gaierror as e:
+        return ERR, None, lookup_error(e), address
+    rtt = elapsed_ms(start)
+    if rtt > timeout * 1000.0:
+        return DOWN, None, "timeout", address
+    return UP, rtt, "", address
 
-  for h in "${HOSTS[@]}"; do
-    local_up=${up_count[$h]}
-    local_tot=${total_count[$h]}
-    pct=$(awk "BEGIN{printf \"%.1f\", ($local_tot>0)?($local_up/$local_tot)*100:0}")
 
-    if   [[ "${status[$h]}" == "UP"   ]]; then stat_str="${C_GREEN}${SYM_UP} UP   ${C_RESET}"
-    elif [[ "${status[$h]}" == "DOWN" ]]; then stat_str="${C_RED}${SYM_DOWN} DOWN ${C_RESET}"
-    else                                       stat_str="${C_YELLOW}? WAIT${C_RESET}"
-    fi
+def encode_dns_name(name: str) -> bytes:
+    """Encode a domain name as DNS wire-format labels; raises UnicodeError if invalid."""
+    name = name.rstrip(".")
+    if not name:
+        return b"\0"  # the root zone
+    wire = b""
+    for label in name.encode("idna").split(b"."):
+        wire += bytes([len(label)]) + label
+    return wire + b"\0"
 
-    local_rtt="${rtt[$h]}"
-    if [[ "$local_rtt" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-      rtt_val=$(awk "BEGIN{printf \"%.1f\", $local_rtt}")
-      if   awk "BEGIN{exit !($rtt_val <  30)}"; then rtt_str="${C_GREEN}${rtt_val} ms${C_RESET}"
-      elif awk "BEGIN{exit !($rtt_val <  80)}"; then rtt_str="${C_YELLOW}${rtt_val} ms${C_RESET}"
-      else                                           rtt_str="${C_RED}${rtt_val} ms${C_RESET}"
-      fi
-    else
-      rtt_str="${C_DIM}${local_rtt}${C_RESET}"
-    fi
 
-    printf "  %-22s  " "$h"
-    echo -ne "${stat_str}  "
-    printf "%-20s" "$(echo -e "${rtt_str}")"
-    printf "%-9s  " "${pct}%"
-    draw_bar "${history[$h]}"
-    echo
-  done
+def skip_dns_name(reply: bytes, pos: int) -> int:
+    """Return the offset just past the (possibly compressed) name starting at pos."""
+    while True:
+        length = reply[pos]
+        if length >= 0xC0:
+            return pos + 2  # compression pointer always ends the name
+        pos += 1 + length
+        if length == 0:
+            return pos
 
-  printf "  ${C_DIM}Updated: %s   interval: ${INTERVAL}s   timeout: ${TIMEOUT_MS}ms   Ctrl+C to quit${C_RESET}\n" \
-    "$(date '+%H:%M:%S')"
 
-  sleep "$INTERVAL"
-done
+def first_a_record(reply: bytes) -> str:
+    """Return the first A record in a DNS reply, or "" if it has none; raises on malformed replies."""
+    question_count, answer_count = struct.unpack("!HH", reply[4:8])
+    pos = 12
+    for _ in range(question_count):
+        pos = skip_dns_name(reply, pos) + 4  # type, class
+    for _ in range(answer_count):
+        pos = skip_dns_name(reply, pos)
+        rtype, _, _, rdlength = struct.unpack("!HHIH", reply[pos:pos + 10])
+        pos += 10
+        if rtype == 1 and rdlength == 4:
+            return socket.inet_ntoa(reply[pos:pos + 4])
+        pos += rdlength  # e.g. a CNAME before the A record
+    return ""
+
+
+def probe_dns_server(qname: bytes, server: str, port: int, timeout: float) -> Result:
+    address = ""
+    try:
+        family, sockaddr = resolve(server, port, socket.SOCK_DGRAM)
+    except socket.gaierror:
+        return DNS_ERR, None, "bad server", address
+    query_id = random.randrange(65536)
+    # Header: id, flags (recursion desired), 1 question, 0 answer/authority/additional.
+    header = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0)
+    query = header + qname + struct.pack("!HH", 1, 1)  # type A, class IN
+
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    start = time.monotonic()
+    deadline = start + timeout
+    try:
+        sock.connect(sockaddr)
+        sock.send(query)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return DOWN, None, "timeout", address
+            sock.settimeout(remaining)
+            reply = sock.recv(4096)
+            if len(reply) < 4:
+                continue
+            reply_id, flags = struct.unpack("!HH", reply[:4])
+            if reply_id == query_id:
+                break
+        rtt = elapsed_ms(start)
+    except socket.timeout:
+        return DOWN, None, "timeout", address
+    except ConnectionRefusedError:
+        return ERR, None, "refused", address
+    except OSError as e:
+        return DOWN, None, e.strerror or type(e).__name__, address
+    finally:
+        sock.close()
+
+    rcode = flags & 0x000F
+    if rcode == 0:
+        try:
+            address = first_a_record(reply)
+        except (IndexError, struct.error, OSError):
+            return ERR, None, "bad reply", address
+        return UP, rtt, "", address
+    if rcode == 3:
+        return ERR, None, "NXDOMAIN", address
+    return ERR, None, "rcode %d" % rcode, address
+
+
+# ── Targets ──────────────────────────────────────────────────────────────────
+
+
+def is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host.split("%")[0])  # drop an IPv6 zone such as %en0
+    except ValueError:
+        return False
+    return True
+
+
+def expand_target(arg: str) -> List[str]:
+    """Expand IPv4 shorthand such as 10.32.1.1,5-7 into addresses; return any other arg unchanged.
+
+    Raises ValueError for an octet above 255, a reversed range, or too many addresses.
+    """
+    octets = arg.split(".")
+    # Plain addresses stay as typed: rewriting "010" would change how ping reads it.
+    if "," not in arg and "-" not in arg:
+        return [arg]
+    if len(octets) != 4 or not all(OCTET_SPEC_RE.fullmatch(octet) for octet in octets):
+        return [arg]
+
+    choices = []
+    count = 1
+    for octet in octets:
+        values = []
+        for part in octet.split(","):
+            first, _, last = part.partition("-")
+            start = int(first)
+            end = int(last) if last else start
+            if start > end:
+                raise ValueError("range %s is reversed" % part)
+            if end > 255:
+                raise ValueError("%d is not a valid octet" % end)
+            values.extend(range(start, end + 1))
+        choices.append(values)
+        count *= len(values)
+    if count > MAX_EXPANSION:
+        raise ValueError("expands to %d addresses, more than %d" % (count, MAX_EXPANSION))
+
+    addresses = []
+    for combo in itertools.product(*choices):
+        addresses.append(".".join(str(value) for value in combo))
+    return addresses
+
+
+def tailscale_cli() -> str:
+    """Return the path of the tailscale CLI; raises ValueError if there is none."""
+    cli = shutil.which("tailscale")
+    if not cli and os.access(TAILSCALE_APP_CLI, os.X_OK):
+        cli = TAILSCALE_APP_CLI
+    if not cli:
+        raise ValueError("tailscale CLI not found")
+    return cli
+
+
+def tailscale_ip(cli: str, name: str) -> str:
+    """Return the Tailscale IPv4 address of a tailnet machine; raises ValueError if it can't."""
+    try:
+        proc = subprocess.run(
+            [cli, "ip", "-4", name],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        raise ValueError("tailscale ip timed out")
+    if proc.returncode != 0:
+        error = tailscale_lines(proc.stderr) + tailscale_lines(proc.stdout)
+        raise ValueError(error[0] if error else "tailscale ip failed")
+    ip = proc.stdout.strip()
+    if not is_ip(ip):
+        raise ValueError("unexpected tailscale ip output %r" % ip)
+    return ip
+
+
+def strip_brackets(host: str) -> str:
+    """Turn a URL-style IPv6 literal such as [::1] into ::1."""
+    if host.startswith("[") and host.endswith("]"):
+        return host[1:-1]
+    return host
+
+
+def parse_target(arg: str) -> Tuple[Callable[[float], Result], bool]:
+    """Return (probe taking a timeout in seconds, whether to show the resolved address).
+
+    Raises ValueError if arg is invalid.
+    """
+    if "://" not in arg:
+        host = strip_brackets(arg)
+        return functools.partial(probe_icmp, host), not is_ip(host)
+
+    scheme, rest = arg.split("://", 1)
+    scheme = scheme.lower()
+
+    if scheme == "icmp":
+        host = strip_brackets(rest.rstrip("/"))
+        if not host:
+            raise ValueError("missing host")
+        return functools.partial(probe_icmp, host), not is_ip(host)
+
+    if scheme == "ts":
+        name = rest.rstrip("/")
+        if not name:
+            raise ValueError("missing name")
+        # Look the name up once, so a typo fails at startup instead of filling a row with errors.
+        cli = tailscale_cli()
+        return functools.partial(probe_tailscale, cli, tailscale_ip(cli, name)), True
+
+    if scheme in ("http", "https"):
+        parts = urllib.parse.urlsplit(arg)
+        parts.port  # raises ValueError if not a valid port number
+        host = parts.hostname
+        if not host:
+            raise ValueError("missing host")
+        # http.client only sends ASCII, so percent-encode a UTF-8 path and query.
+        url = urllib.parse.urlunsplit((
+            parts.scheme,
+            parts.netloc,
+            urllib.parse.quote(parts.path, safe=URL_SAFE),
+            urllib.parse.quote(parts.query, safe=URL_SAFE),
+            "",
+        ))
+        return functools.partial(probe_http, url), not is_ip(host)
+
+    if scheme == "tcp":
+        parts = urllib.parse.urlsplit(arg)
+        port = parts.port  # raises ValueError if not a valid port number
+        if not parts.hostname or port is None:
+            raise ValueError("expected tcp://HOST:PORT")
+        return functools.partial(probe_tcp, parts.hostname, port), not is_ip(parts.hostname)
+
+    if scheme == "dns":
+        name, _, server = rest.partition("@")
+        name = name.rstrip("/")
+        if not name:
+            raise ValueError("missing name")
+        if not server:
+            return functools.partial(probe_dns_system, name), True
+        try:
+            qname = encode_dns_name(name)
+        except UnicodeError:
+            raise ValueError("invalid DNS name %r" % name)
+        parts = urllib.parse.urlsplit("//" + server)
+        if not parts.hostname:
+            raise ValueError("missing server")
+        return functools.partial(probe_dns_server, qname, parts.hostname, parts.port or 53), True
+
+    raise ValueError("unknown scheme %r" % scheme)
+
+
+class Target:
+    def __init__(self, label: str, probe: Callable[[float], Result], show_address: bool, history: int):
+        self.label = label
+        self.probe = probe
+        self.show_address = show_address
+        self.keep = history
+        self.results = {}  # time slot -> Result, for the last `keep` slots
+        self.pending = set()  # time slots whose probe hasn't finished
+        self.last: Optional[Result] = None  # result of the newest finished slot
+        self.last_slot = -1
+        self.up = 0
+        self.total = 0
+        self.has_via = False  # set once a result reported a Tailscale path
+
+    def record(self, slot: int, result: tuple) -> None:
+        result = Result(*result)
+        self.pending.discard(slot)
+        self.total += 1
+        if result.status == UP:
+            self.up += 1
+        if result.via:
+            self.has_via = True
+        # A slow probe can finish after a newer one; it must not replace the newer status.
+        if slot > self.last_slot:
+            self.last_slot = slot
+            self.last = result
+        self.results[slot] = result
+        for old in [s for s in self.results if s <= self.last_slot - self.keep]:
+            del self.results[old]
+
+
+class Clock:
+    """The newest time slot; slot N starts N intervals after launch and is shared by all targets."""
+
+    def __init__(self):
+        self.slot = -1
+
+
+def run_probe(target: Target, slot: int, timeout: float, lock: threading.Lock) -> None:
+    try:
+        result = target.probe(timeout)
+    except Exception as e:
+        result = (ERR, None, type(e).__name__, "")
+    with lock:
+        target.record(slot, result)
+
+
+def run_scheduler(targets, interval: float, timeout: float, clock: Clock,
+                  lock: threading.Lock, stop: threading.Event) -> None:
+    # Probe every target at the start of every slot, even if its previous probe is still
+    # running, so the same history column means the same moment on every row.
+    start = time.monotonic()
+    slot = 0
+    while not stop.is_set():
+        with lock:
+            clock.slot = slot
+            for t in targets:
+                t.pending.add(slot)
+        for t in targets:
+            # Daemon threads, so quitting never waits for a probe stuck in a lookup.
+            threading.Thread(target=run_probe, args=(t, slot, timeout, lock), daemon=True).start()
+        # If we fell behind (e.g. the machine slept), skip the missed slots instead of bursting.
+        slot = max(slot + 1, int((time.monotonic() - start) / interval))
+        stop.wait(max(0.0, start + slot * interval - time.monotonic()))
+
+
+# ── Rendering ────────────────────────────────────────────────────────────────
+
+
+def char_width(ch: str) -> int:
+    # Marks, format characters (zero-width space/joiner, variation selectors) and Hangul vowel/final jamo.
+    if unicodedata.category(ch) in ("Mn", "Me", "Cf") or "\u1160" <= ch <= "\u11ff":
+        return 0
+    if unicodedata.east_asian_width(ch) in ("W", "F"):
+        return 2
+    return 1
+
+
+def text_width(text: str) -> int:
+    return sum(char_width(ch) for ch in text)
+
+
+def printable(text: str) -> str:
+    """Replace control characters so text from argv or errors can't send terminal sequences."""
+    return "".join("?" if unicodedata.category(ch) == "Cc" else ch for ch in text)
+
+
+def fit(text: str, width: int) -> str:
+    """Left-align plain text in exactly `width` terminal columns, truncating with an ellipsis."""
+    text = printable(text)
+    if text_width(text) > width:
+        out = ""
+        used = 0
+        for ch in text:
+            if used + char_width(ch) > width - 1:
+                break
+            out += ch
+            used += char_width(ch)
+        text = out + "…"
+    return text + " " * (width - text_width(text))
+
+
+ANSI_RE = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
+
+
+def clip(line: str, width: int) -> str:
+    """Cut a line containing colour codes to `width` visible columns, so the terminal never wraps it."""
+    out = ""
+    used = 0
+    pos = 0
+    while pos < len(line):
+        match = ANSI_RE.match(line, pos)
+        if match:
+            out += match.group()
+            pos = match.end()
+            continue
+        used += char_width(line[pos])
+        if used > width:
+            return out + RESET
+        out += line[pos]
+        pos += 1
+    return out
+
+
+def render(targets, label_width: int, args, size: os.terminal_size, current_slot: int) -> str:
+    rtt_width = 14
+    lines = []
+
+    # Only show the address column when some target is a name, sized to the longest current address.
+    address_width = 0
+    for t in targets:
+        if t.show_address:
+            address_width = max(address_width, len("ADDRESS"))
+            if t.last:
+                address_width = max(address_width, text_width(t.last.address))
+
+    # Same for the Tailscale path column, capped so an unexpected long value can't push the history off.
+    via_width = 0
+    for t in targets:
+        if t.has_via:
+            via_width = max(via_width, len("VIA"), text_width(t.last.via))
+    via_width = min(via_width, 30)
+
+    columns = [fit("TARGET", label_width)]
+    if address_width:
+        columns.append(fit("ADDRESS", address_width))
+    columns.append(fit("STATUS", 7))
+    columns.append(fit("RTT", rtt_width))
+    if via_width:
+        columns.append(fit("VIA", via_width))
+    header = "  ".join(columns + [
+        fit("UPTIME", 7),
+        "HISTORY (last %gs)" % (args.history * args.interval),
+    ])
+    lines.append("  " + GREY + header + RESET)
+    lines.append("  " + DIM + "─" * text_width(header) + RESET)
+
+    for t in targets:
+        status = t.last.status if t.last else None
+        status_text, status_color = STATUS_TEXT[status]
+
+        if t.last is None:
+            rtt_text, rtt_color = "", DIM
+        elif status == UP and t.last.rtt is None:
+            rtt_text, rtt_color = "?", DIM
+        elif status == UP:
+            rtt = t.last.rtt
+            rtt_text = "%.1f ms" % rtt
+            if rtt < args.warn:
+                rtt_color = GREEN
+            elif rtt < args.crit:
+                rtt_color = YELLOW
+            else:
+                rtt_color = RED
+        else:
+            rtt_text, rtt_color = t.last.note, status_color
+
+        if t.total:
+            uptime = "%.1f%%" % (100.0 * t.up / t.total)
+        else:
+            uptime = "—"
+
+        # Columns are time slots shared by all rows, newest on the right.
+        bar = ""
+        for slot in range(current_slot - args.history + 1, current_slot + 1):
+            result = t.results.get(slot)
+            if result is None and slot in t.pending:
+                bar += YELLOW + "·"
+            elif result is None:
+                bar += DIM + "·"
+            elif result.status == UP:
+                bar += GREEN + "▪"
+            elif result.status in (CERT, REDIR):
+                bar += ORANGE + "▫"
+            else:
+                bar += RED + "▫"
+        bar += RESET
+
+        columns = [fit(t.label, label_width)]
+        if address_width:
+            address = t.last.address if t.last and t.show_address else ""
+            columns.append(DIM + fit(address, address_width) + RESET)
+        columns.append(status_color + fit(status_text, 7) + RESET)
+        columns.append(rtt_color + fit(rtt_text, rtt_width) + RESET)
+        if via_width:
+            via = t.last.via if t.last else ""
+            # Direct and peer-relay paths are UDP and fast; DERP (relayed over TCP) and anything unknown are yellow.
+            if via in ("direct", "peer-relay"):
+                via_color = GREEN
+            else:
+                via_color = YELLOW
+            columns.append(via_color + fit(via, via_width) + RESET)
+        lines.append("  " + "  ".join(columns + [
+            fit(uptime, 7),
+            bar,
+        ]))
+
+    footer = "Updated: %s   interval: %gs   timeout: %gs   Ctrl+C to quit" % (
+        time.strftime("%H:%M:%S"), args.interval, args.timeout)
+    # Keep the frame one line shorter than the terminal: a newline on the last line would scroll it.
+    max_rows = max(1, size.lines - 2)
+    if len(lines) > max_rows:
+        footer += "   (%d rows hidden, enlarge the window)" % (len(lines) - max_rows)
+        lines = lines[:max_rows]
+    lines.append("  " + DIM + footer + RESET)
+    return "".join(clip(line, size.columns) + CLEAR_EOL + "\n" for line in lines)
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        prog="pings",
+        description="Monitor several targets at once.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("targets", nargs="+", metavar="TARGET")
+    parser.add_argument("-i", "--interval", type=float, default=0.5,
+                        help="seconds between probes of each target (default: 0.5)")
+    parser.add_argument("-t", "--timeout", type=float, default=1.0,
+                        help="probe timeout in seconds (default: 1)")
+    parser.add_argument("-n", "--history", type=int, default=20,
+                        help="number of time slots (intervals) shown in the history bar (default: 20)")
+    parser.add_argument("--warn", type=float, default=30,
+                        help="RTT in ms from which it shows yellow (default: 30)")
+    parser.add_argument("--crit", type=float, default=80,
+                        help="RTT in ms from which it shows red (default: 80)")
+    args = parser.parse_args()
+    if args.interval <= 0:
+        parser.error("--interval must be positive")
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
+    if args.history < 1:
+        parser.error("--history must be at least 1")
+
+    expanded = []
+    for arg in args.targets:
+        try:
+            expanded.extend(expand_target(arg))
+        except ValueError as e:
+            parser.error("%s: %s" % (arg, e))
+    args.targets = expanded
+
+    args.probes = []
+    for arg in args.targets:
+        try:
+            args.probes.append(parse_target(arg))
+        except ValueError as e:
+            parser.error("%s: %s" % (arg, e))
+    return args
+
+
+def main() -> int:
+    args = parse_args()
+    if not sys.stdout.isatty():
+        sys.exit("pings: stdout must be a terminal")
+
+    targets = []
+    for arg, (probe, show_address) in zip(args.targets, args.probes):
+        # argv may hold bytes that aren't valid UTF-8; make the label printable.
+        label = arg.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+        targets.append(Target(label, probe, show_address, args.history))
+    label_width = min(40, max(6, max(text_width(t.label) for t in targets)))
+
+    lock = threading.Lock()
+    stop = threading.Event()
+    clock = Clock()
+    scheduler = threading.Thread(
+        target=run_scheduler,
+        args=(targets, args.interval, args.timeout, clock, lock, stop),
+        daemon=True,
+    )
+    scheduler.start()
+
+    # Turn SIGTERM into a normal exit so the cursor gets restored.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
+
+    out = sys.stdout
+    out.write(HIDE_CURSOR + CLEAR_SCREEN)
+    exit_code = 0
+    try:
+        while True:
+            with lock:
+                frame = render(targets, label_width, args, shutil.get_terminal_size(), clock.slot)
+            out.write(HOME + frame + CLEAR_EOS)
+            out.flush()
+            time.sleep(min(args.interval, 0.25))
+    except KeyboardInterrupt:
+        exit_code = 130
+    finally:
+        stop.set()
+        out.write(SHOW_CURSOR)
+        out.flush()
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
