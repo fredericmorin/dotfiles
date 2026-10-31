@@ -2,6 +2,7 @@
 name: modernize-skill
 description: Refactor an existing Claude skill for current-generation models — strip hand-holding and legacy guardrails, keep intent, boundaries, and output formats, and cut its length by at least half. Use when asked to modernize, slim down, trim, or refactor a skill; also for "/modernize-skill <name>".
 argument-hint: "<skill-name or path to SKILL.md>"
+disable-model-invocation: true
 ---
 
 # Modernize a skill
