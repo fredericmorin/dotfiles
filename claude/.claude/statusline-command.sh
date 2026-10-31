@@ -6,170 +6,167 @@
 #     "command" : "sh \/Users\/fred\/flare\/config\/.claude\/statusline-command.sh",
 #     "type" : "command"
 #   },
-input=$(cat)
+#
+# Runs every few seconds in every session, so it keeps process count low:
+# one jq pass parses and formats all stdin fields, shell builtins do the rest.
 
-# --- fields from stdin -------------------------------------------------------
-session_id=$(echo "$input" | jq -r '.session_id // empty')
-model=$(echo "$input" | jq -r '.model.display_name // empty' | sed 's/ (\([0-9]*[MK]\) context)/ \1/')
-model_id=$(echo "$input" | jq -r '.model.id // empty')
-# A manually-forced "[1m]" model id suffix means the 1M context window; surface
-# it in the model widget when the display name doesn't already say so.
-case "$model_id" in
-  *"[1m]"*) case "$model" in *1M*) ;; *) model="${model} 1M" ;; esac ;;
-esac
-effort=$(echo "$input" | jq -r '.effort.level // empty')
-cached=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
-cwd=$(echo "$input" | jq -r '.cwd // empty')
-transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+# --- fields from stdin (single jq pass) --------------------------------------
+eval "$(jq -r '
+  def eta($t): ($t - (now | floor)) as $d
+    | if $t <= 0 or $d <= 0 then ""
+      elif $d >= 86400 then "\($d / 86400 | floor)d\(($d % 86400) / 3600 | floor)h"
+      elif $d >= 3600 then "\($d / 3600 | floor)h\(($d % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m"
+      else "\(($d / 60 | floor) + (if $d % 60 > 0 then 1 else 0 end))m" end;
+  def limit($w): ($w // {}) as $w
+    | [($w.used_percentage // -1 | round), ($w.resets_at // 0 | floor)]
+    | [.[0], eta(.[1])];
+  def human: if . >= 1000000 then (. / 100000 | round) as $x | "\($x / 10 | floor).\($x % 10)M"
+    elif . >= 1000 then (. / 100 | round) as $x | "\($x / 10 | floor).\($x % 10)k"
+    else floor | tostring end;
+
+  (.model.display_name // "" | sub(" \\((?<n>[0-9]*[MK]) context\\)"; " \(.n)")) as $m
+  | (if (.model.id // "" | contains("[1m]")) and ($m | contains("1M") | not)
+     then "\($m) 1M" else $m end) as $model
+  | .context_window as $cw
+  | (if ($cw.context_window_size // 0) > 0 and $cw.total_input_tokens != null
+     then ($cw.total_input_tokens / $cw.context_window_size * 100 + 0.5 | floor
+           | if . < 0 then 0 elif . > 100 then 100 else . end)
+     else ($cw.used_percentage
+           // (if $cw.remaining_percentage != null then 100 - $cw.remaining_percentage else null end)
+           // 0) end) as $used
+  | ($used / 100 * 10 + 0.5 | floor | if . < 0 then 0 elif . > 9 then 9 else . end) as $f
+  | ([range(10) | if . == $f then "●" elif . < $f then "━" else "─" end] | join("")) as $bar
+  | limit(.rate_limits.five_hour) as [$h5p, $h5e]
+  | limit(.rate_limits.seven_day) as [$d7p, $d7e]
+  | @sh "now=\(now | floor)",
+    @sh "sid=\(.session_id // "" | .[0:8])",
+    @sh "model=\($model)",
+    @sh "effort=\(.effort.level // "")",
+    @sh "cwd=\(.cwd // "")",
+    @sh "transcript=\(.transcript_path // "")",
+    @sh "project_dir=\(.workspace.project_dir // .cwd // "")",
+    @sh "used=\($used)",
+    @sh "bar=\($bar)",
+    @sh "cached_h=\($cw.current_usage.cache_read_input_tokens // 0 | human)",
+    @sh "h5_pct=\($h5p)", @sh "h5_eta=\($h5e)",
+    @sh "d7_pct=\($d7p)", @sh "d7_eta=\($d7e)"
+')"
 
 # Prompt cache TTL countdown: time left since the last API response, using a
 # 1h TTL when that response wrote 1h cache entries, else the default 5m.
 cache_left=""
 if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-  last=$(tail -n 200 "$transcript" | grep '"type":"assistant"' | tail -n 1 | jq -r '
-    [ (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601),
-      (if (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) > 0
-       then 3600 else 300 end) ] | "\(.[0]) \(.[1])"' 2>/dev/null)
-  if [ -n "$last" ]; then
-    cache_left=$(awk -v ts="${last% *}" -v ttl="${last#* }" -v n="$(date +%s)" 'BEGIN{
-      d = ts + ttl - n; if (d < 0) d = 0; printf "%d", d }')
-  fi
+  cache_left=$(tail -n 200 "$transcript" | grep '"type":"assistant"' | jq -rn '
+    last(inputs | select(.type == "assistant"))
+    | (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)
+      + (if (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) > 0
+         then 3600 else 300 end)
+      - (now | floor)
+    | if . < 0 then 0 else . end' 2>/dev/null)
 fi
-
-# Claude.ai rate limit windows (5-hour + 7-day): usage % and seconds to reset.
-rl=$(echo "$input" | jq -r '
-  [ (.rate_limits.five_hour  // {}) , (.rate_limits.seven_day // {}) ]
-  | map("\((.used_percentage // -1) | round) \((.resets_at // 0) | floor)") | join(" ")')
-set -- $rl
-h5_pct=${1:--1}; h5_reset=${2:-0}; d7_pct=${3:--1}; d7_reset=${4:-0}
 
 # Sandbox state. Neither stdin nor the hook payloads expose it, so read
 # sandbox.enabled from the settings chain the way the CLI merges it: managed
 # policy first, then local (what /sandbox writes), project, and user.
-project_dir=$(echo "$input" | jq -r '.workspace.project_dir // .cwd // empty')
-sandbox_enabled=""
+set --
 for f in \
   "/Library/Application Support/ClaudeCode/managed-settings.json" \
   "${project_dir}/.claude/settings.local.json" \
   "${project_dir}/.claude/settings.json" \
   "$HOME/.claude/settings.json"
 do
-  [ -f "$f" ] || continue
-  v=$(jq -r 'if .sandbox.enabled == null then "" else (.sandbox.enabled | tostring) end' "$f" 2>/dev/null)
-  if [ -n "$v" ]; then sandbox_enabled="$v"; break; fi
+  [ -f "$f" ] && set -- "$@" "$f"
 done
+sandbox_enabled=""
+[ $# -gt 0 ] && sandbox_enabled=$(jq -rn '
+  first(inputs | .sandbox.enabled | select(. != null) | tostring) // ""' "$@" 2>/dev/null)
 [ -n "$CLAUDE_CODE_FORCE_SANDBOX" ] && sandbox_enabled="true"
 
-if [ "$sandbox_enabled" = "true" ]; then
-  sandboxed="sandboxed"
-else
-  sandboxed="unsandboxed"
-fi
-
-# Context fill % computed from the REAL window size (e.g. 1M), so the bar never
-# assumes a fixed 200k. Falls back to the reported percentage only if the token
-# counts or window size are unavailable.
-size=$(echo "$input" | jq -r '.context_window.context_window_size // empty')
-toks=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty')
-if [ -n "$size" ] && [ -n "$toks" ] && [ "$size" -gt 0 ]; then
-  used=$(awk -v t="$toks" -v s="$size" 'BEGIN{ p=int(t/s*100+0.5); if(p<0)p=0; if(p>100)p=100; print p }')
-else
-  used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
-  remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
-  [ -z "$used" ] && [ -n "$remaining" ] && used=$((100 - remaining))
-  [ -z "$used" ] && used=0
-fi
-
 # --- ANSI colors (mapping ccstatusline widget colors) ------------------------
-reset='\033[0m'
-cyan='\033[36m'          # model
-gray='\033[90m'          # brightBlack: context bar + separators
-brightGreen='\033[92m'   # tokens-cached
-green='\033[32m'         # sandbox state: sandboxed
-blue='\033[34m'          # sandbox state: unsandboxed
-magenta='\033[35m'       # git-branch
-yellow='\033[33m'        # git-changes
-green='\033[32m'         # rate limit ok
-red='\033[31m'           # rate limit high
+esc=$(printf '\033')
+reset="${esc}[0m"
+cyan="${esc}[36m"          # model
+gray="${esc}[90m"          # brightBlack: context bar + separators
+brightGreen="${esc}[92m"   # tokens-cached
+green="${esc}[32m"         # sandboxed / rate limit ok
+blue="${esc}[34m"          # sandbox state: unsandboxed
+magenta="${esc}[35m"       # git-branch
+yellow="${esc}[33m"        # git-changes
+red="${esc}[31m"           # rate limit high
 
 sep="${gray} | ${reset}"
 
 # --- rate limit windows ------------------------------------------------------
 # "18% 2h13m" — percentage used of the window, plus time until it resets.
-fmt_eta() {
-  awk -v t="$1" -v n="$(date +%s)" 'BEGIN{
-    d = t - n;
-    if (t <= 0 || d <= 0) { print ""; exit }
-    if (d >= 86400) { printf "%dd%dh", int(d/86400), int((d%86400)/3600) }
-    else if (d >= 3600) { printf "%dh%02dm", int(d/3600), int((d%3600)/60) }
-    else { printf "%dm", int(d/60) + (d%60 > 0) }
-  }'
-}
-pct_color() {
-  if [ "$1" -ge 80 ]; then printf '%s' "$red"
-  elif [ "$1" -ge 50 ]; then printf '%s' "$yellow"
-  else printf '%s' "$green"; fi
-}
-limit_widget() {  # label, pct, resets_at
+limit_widget() {  # label, pct, eta -> sets $widget
+  widget=""
   [ "$2" -lt 0 ] && return
-  eta=$(fmt_eta "$3")
-  printf '%b%s:%s%%%b%s' "$(pct_color "$2")" "$1" "$2" "$reset" "${eta:+ ${gray}${eta}${reset}}"
+  if [ "$2" -ge 80 ]; then c="$red"
+  elif [ "$2" -ge 50 ]; then c="$yellow"
+  else c="$green"; fi
+  widget="${c}$1:$2%${reset}${3:+ ${gray}$3${reset}}"
 }
-
-# --- context bar (slider style) ----------------------------------------------
-width=10
-filled=$(awk -v u="$used" -v w="$width" 'BEGIN{
-  f = int(u / 100 * w + 0.5);
-  if (f < 0) f = 0; if (f > w - 1) f = w - 1;
-  print f
-}')
-bar=""
-i=0
-while [ "$i" -lt "$width" ]; do
-  if [ "$i" -eq "$filled" ]; then bar="${bar}●"
-  elif [ "$i" -lt "$filled" ]; then bar="${bar}━"
-  else bar="${bar}─"; fi
-  i=$((i + 1))
-done
-
-# --- cached tokens (human readable) ------------------------------------------
-cached_h=$(awk -v n="$cached" 'BEGIN{
-  if (n >= 1000000) { printf "%.1fM", n / 1000000 }
-  else if (n >= 1000) { printf "%.1fk", n / 1000 }
-  else { printf "%d", n }
-}')
 
 # --- git branch + changes ----------------------------------------------------
+# The worktree diff stats every tracked file, the costliest part of this
+# script, so branch and +/- counts are cached per worktree in
+# <gitdir>/statusline-cache as "<epoch> <branch> <add> <del>". The cache is
+# reused unless one of these changed since it was written:
+#   - the session transcript (Claude is active, so it may be editing files)
+#   - <gitdir>/index (stage, commit, checkout, rebase)
+#   - <gitdir>/HEAD (branch switch)
+# or it is older than 30s (catches edits made outside Claude). Idle sessions
+# then run no git at all between expiries. The gitdir is read from .git
+# directly (a dir in the main checkout, a "gitdir: <path>" file in a
+# worktree), falling back to git when cwd is a subdirectory.
+# --no-optional-locks: no index rewrite per refresh; no preload: fewer threads.
 branch=""
 changes=""
+gitdir=""
 if [ -n "$cwd" ]; then
-  branch=$(git -C "$cwd" symbolic-ref --quiet --short HEAD 2>/dev/null)
-  if [ -z "$branch" ]; then
-    sha=$(git -C "$cwd" rev-parse --short=8 HEAD 2>/dev/null)
-    [ -n "$sha" ] && branch="$sha"
+  if [ -d "$cwd/.git" ]; then
+    gitdir="$cwd/.git"
+  elif [ -f "$cwd/.git" ]; then
+    read -r _ gitdir < "$cwd/.git"
+    case "$gitdir" in /*) ;; *) gitdir="$cwd/$gitdir" ;; esac
+  else
+    gitdir=$(git -C "$cwd" rev-parse --absolute-git-dir 2>/dev/null)
   fi
-  if [ -n "$branch" ]; then
-    sums=$( { git -C "$cwd" diff --numstat 2>/dev/null; \
-              git -C "$cwd" diff --cached --numstat 2>/dev/null; } \
-            | awk '{ if ($1 != "-") a += $1; if ($2 != "-") d += $2 } END { printf "%d %d", a + 0, d + 0 }')
-    add=${sums% *}
-    del=${sums#* }
-    if [ "$add" -gt 0 ] || [ "$del" -gt 0 ]; then
-      changes="+${add} -${del}"
+fi
+if [ -n "$gitdir" ]; then
+  cache="$gitdir/statusline-cache"
+  ts=0
+  if [ -f "$cache" ] && [ ! "$transcript" -nt "$cache" ] \
+     && [ ! "$gitdir/index" -nt "$cache" ] && [ ! "$gitdir/HEAD" -nt "$cache" ]; then
+    read -r ts branch add del < "$cache"
+  fi
+  if [ $((now - ${ts:-0})) -ge 30 ]; then
+    branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --quiet --short HEAD 2>/dev/null \
+      || git --no-optional-locks -C "$cwd" rev-parse --short=8 HEAD 2>/dev/null)
+    add=0
+    del=0
+    if [ -n "$branch" ]; then
+      sums=$( { git --no-optional-locks -c core.preloadIndex=false -C "$cwd" diff --numstat 2>/dev/null; \
+                git --no-optional-locks -C "$cwd" diff --cached --numstat 2>/dev/null; } \
+              | awk '{ if ($1 != "-") a += $1; if ($2 != "-") d += $2 } END { printf "%d %d", a + 0, d + 0 }')
+      add=${sums% *}
+      del=${sums#* }
+      { printf '%s %s %s %s\n' "$now" "$branch" "$add" "$del" > "$cache"; } 2>/dev/null
     fi
+  fi
+  if [ -n "$branch" ] && { [ "$add" -gt 0 ] || [ "$del" -gt 0 ]; }; then
+    changes="+${add} -${del}"
   fi
 fi
 
 # --- assemble ----------------------------------------------------------------
-sid=$(printf '%s' "$session_id" | cut -c1-8)
-
 out="${sid}"
 out="${out}${sep}${cyan}${model}${reset}"
 [ -n "$effort" ] && out="${out} ${effort}"
 if [ "$sandbox_enabled" = "true" ]; then
-  out="${out}${sep}${green}${sandboxed}${reset}"
+  out="${out}${sep}${green}sandboxed${reset}"
 else
-  out="${out}${sep}${blue}${sandboxed}${reset}"
+  out="${out}${sep}${blue}unsandboxed${reset}"
 fi
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
 out="${out}${sep}${brightGreen}cached:${cached_h}${reset}"
@@ -177,17 +174,19 @@ if [ -n "$cache_left" ]; then
   if [ "$cache_left" -eq 0 ]; then cc="$red"
   elif [ "$cache_left" -lt 60 ]; then cc="$yellow"
   else cc="$green"; fi
-  out="${out} ${cc}$(printf '%d:%02d' $((cache_left / 60)) $((cache_left % 60)))${reset}"
+  out="${out} ${cc}$((cache_left / 60)):$(( cache_left % 60 / 10 ))$(( cache_left % 10 ))${reset}"
 fi
-h5=$(limit_widget 5h "$h5_pct" "$h5_reset")
-d7=$(limit_widget 7d "$d7_pct" "$d7_reset")
-[ -n "$h5" ] && out="${out}${sep}${h5}"
-[ -n "$d7" ] && out="${out}${sep}${d7}"
+limit_widget 5h "$h5_pct" "$h5_eta"
+[ -n "$widget" ] && out="${out}${sep}${widget}"
+limit_widget 7d "$d7_pct" "$d7_eta"
+[ -n "$widget" ] && out="${out}${sep}${widget}"
 if [ -n "$branch" ]; then
-  home="$HOME"
-  short_cwd=$(echo "$cwd" | sed "s|^$home|~|")
+  case "$cwd" in
+    "$HOME"*) short_cwd="~${cwd#"$HOME"}" ;;
+    *) short_cwd="$cwd" ;;
+  esac
   out="${out}${sep}${gray}${short_cwd}${reset}${magenta}@${branch}${reset}"
   [ -n "$changes" ] && out="${out} ${yellow}${changes}${reset}"
 fi
 
-printf "%b\n" "$out"
+printf '%s\n' "$out"
