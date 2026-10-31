@@ -8,7 +8,6 @@
   "skillOverrides": {
     "dataviz": "off",
     "code-review": "off",
-    "claude-api": "off",
     "anthropic-skills:built-in-browser": "off",
     "anthropic-skills:chrome-browser": "off",
     "anthropic-skills:computer-use": "off",

@@ -73,7 +73,7 @@ for f in \
   "/Library/Application Support/ClaudeCode/managed-settings.json" \
   "${project_dir}/.claude/settings.local.json" \
   "${project_dir}/.claude/settings.json" \
-  "$HOME/.claude/settings.json"
+  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 do
   [ -f "$f" ] && set -- "$@" "$f"
 done

@@ -9,9 +9,20 @@ STOWS += bins
 STOWS += claude
 STOWS += iTerm2
 
+# Work machine: ~/.claude is the work profile (settings.json from ~/flare/config) and the
+# personal one is ~/.claude-personal, so skip settings.json in ~/.claude and stow the claude
+# package into ~/.claude-personal too (no folding: Claude writes its state in that dir).
+CLAUDE_PERSONAL_DIR := $(wildcard $(HOME)/.claude-personal)
+
 .PHONY: install
 install:
-	stow -v ${STOWS}
+	stow -v ${STOWS:claude=}
+ifeq ($(CLAUDE_PERSONAL_DIR),)
+	stow -v claude
+else
+	stow -v --ignore='settings\.json' claude
+	stow -v --no-folding -d claude -t ${CLAUDE_PERSONAL_DIR} .claude
+endif
 
 #####################
 # brew apps
