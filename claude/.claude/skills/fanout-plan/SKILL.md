@@ -71,7 +71,11 @@ Standard spec prose, plus:
 
 - Where things stand: what already landed, evidence of what is left, linked prior specs.
 - A step table in landing order: step, part, sidecar link, scope, size, difficulty.
-- Under the table, one launch line per step: `/fanout-run-step docs/specs/<plan>.md --step N`.
+- Under the table, one launch line per step, as the script command so it runs without a
+  Claude turn: `~/.claude/skills/fanout-run-step/spawn.sh docs/specs/<plan>.md --step 1`
+  for step 1, and `git fetch origin && ~/.claude/skills/fanout-run-step/spawn.sh
+  docs/specs/<plan>.md --step N -B origin/master` for later steps, run only after step
+  N−1's MRs merge.
 - One line per step boundary naming the dependency that forces it.
 - The shared files each group touches.
 - Out of scope, with reasons, including near-misses.

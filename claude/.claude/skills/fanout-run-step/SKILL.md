@@ -19,5 +19,10 @@ to the lowest step that has not been spawned yet.
   merged, say so and stop.
 - Uncommitted plans still work, because the sessions get absolute paths.
 - Report the spawned branches and worktree paths. Each session opens its own MR.
+- When you hand over the next step, give the script command, not the
+  `/fanout-run-step` prompt, so the user can run it without a Claude turn:
+  `! git fetch origin && ~/.claude/skills/fanout-run-step/spawn.sh <plan.md> --step N -B origin/master`
+  (add `--dry-run` to preview). The script does not check that the previous
+  step's MRs merged, so tell the user to confirm that first.
 - Only Supacode creates the worktrees, so its setup script runs. Never use
   `git worktree add`, create branches by hand, or start `claude` directly.
