@@ -4,6 +4,9 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--background] [-- prompt...]
+       fork.sh --args-stdin <<'EOF'
+       [branch] [options] [-- prompt...]
+       EOF
 
 Fork the current Claude Code session into a new Supacode worktree.
   branch        new branch name (default: <current-branch>_fork)
@@ -14,11 +17,46 @@ Fork the current Claude Code session into a new Supacode worktree.
   --background  create the worktree/tab without stealing focus
   -- prompt...  free text sent to the forked session as its first message;
                 any words after the branch are taken as the prompt too
+  --args-stdin  read the whole argument string from stdin instead, so shell
+                metacharacters in the prompt (> < | ; & = $ ` quotes) reach
+                the fork verbatim; options before the first standalone `--`
+                are split on whitespace, everything after it is the prompt
 USAGE
   exit 2
 }
 
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+unquote() {
+  local s="$1"
+  case "$s" in
+    \"*\") s="${s#\"}"; s="${s%\"}" ;;
+    \'*\') s="${s#\'}"; s="${s%\'}" ;;
+  esac
+  printf '%s' "$s"
+}
+
+if [ "${1:-}" = "--args-stdin" ]; then
+  RAW=" $(cat) "
+  ARGV=()
+  case "$RAW" in
+    *[[:space:]]--[[:space:]]*)
+      read -r -d "" -a ARGV <<<"${RAW%%[[:space:]]--[[:space:]]*}" || true
+      ARGV+=(-- "$(unquote "$(trim "${RAW#*[[:space:]]--[[:space:]]}")")")
+      ;;
+    *)
+      read -r -d "" -a ARGV <<<"$RAW" || true
+      ;;
+  esac
+  set -- ${ARGV[@]+"${ARGV[@]}"}
+fi
 
 BRANCH="" BASE="" NAME="" PROMPT="" SAME="" BG=()
 while [ $# -gt 0 ]; do

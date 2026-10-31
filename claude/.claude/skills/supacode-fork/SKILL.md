@@ -5,7 +5,11 @@ argument-hint: "[branch] [-B base-ref] [-n session-name] [-s|--same] [--backgrou
 disable-model-invocation: true
 ---
 
-!`set -o noglob; ~/.claude/skills/supacode-fork/fork.sh $ARGUMENTS 2>&1`
+```!
+~/.claude/skills/supacode-fork/fork.sh --args-stdin 2>&1 <<'SUPACODE_FORK_ARGS_EOF'
+$ARGUMENTS
+SUPACODE_FORK_ARGS_EOF
+```
 
 Relay this in one or two lines: worktree path, branch, new tab, and the
 prompt file handed to the fork when there is one. On failure,
