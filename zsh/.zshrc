@@ -79,11 +79,20 @@ grgd() {
 	fi
 	echo "$gone_branches" | xargs git branch -D
 }
-clspell() {
+claude-spell() {
   setopt localoptions
   set -x
   claude -p --model haiku "Spell check and correct this text. Output only the corrected text, nothing else: $*" | tee >(pbcopy)
 }
+with-claude-vault() {
+  local t
+  t=$(security find-generic-password -a "$USER" -s op-agent-service-account -w) || return 1
+  OP_SERVICE_ACCOUNT_TOKEN=$t "$@"
+}
+claude-brain() {
+  (cd ~/perso/brain && with-claude-vault claude "$@")
+}
+
 
 # uv tools install path. added first -> lowest priority
 # export path=("$HOME/.local/bin" $path)
