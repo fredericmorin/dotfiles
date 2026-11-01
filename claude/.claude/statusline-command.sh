@@ -1,6 +1,6 @@
 #!/bin/sh
 # Claude Code status line — renders the ccstatusline layout:
-#   <session-id> | <model> <effort> | <context slider> | <cached> | <branch> <changes>
+#   <session-id> | <model> <effort> | <context slider> <cache ttl> | <tokens> <cost> | <branch> <changes>
 # To use add this to your ~/.claude/settings.json
 #   "statusLine" : {
 #     "command" : "sh \/Users\/fred\/flare\/config\/.claude\/statusline-command.sh",
@@ -20,9 +20,6 @@ eval "$(jq -r '
   def limit($w): ($w // {}) as $w
     | [($w.used_percentage // -1 | round), ($w.resets_at // 0 | floor)]
     | [.[0], eta(.[1])];
-  def human: if . >= 1000000 then (. / 100000 | round) as $x | "\($x / 10 | floor).\($x % 10)M"
-    elif . >= 1000 then (. / 100 | round) as $x | "\($x / 10 | floor).\($x % 10)k"
-    else floor | tostring end;
 
   (.model.display_name // "" | sub(" \\((?<n>[0-9]*[MK]) context\\)"; " \(.n)")) as $m
   | (if (.model.id // "" | contains("[1m]")) and ($m | contains("1M") | not)
@@ -44,25 +41,49 @@ eval "$(jq -r '
     @sh "effort=\(.effort.level // "")",
     @sh "cwd=\(.cwd // "")",
     @sh "transcript=\(.transcript_path // "")",
+    @sh "cache_left=\(.prompt_cache.expires_at // null
+                       | if . == null then "" else . - now | floor | if . < 0 then 0 else . end end)",
     @sh "project_dir=\(.workspace.project_dir // .cwd // "")",
     @sh "used=\($used)",
     @sh "bar=\($bar)",
-    @sh "cached_h=\($cw.current_usage.cache_read_input_tokens // 0 | human)",
+    @sh "cost=\(.cost.total_cost_usd // 0 | . * 100 | round
+                 | "\(. / 100 | floor).\(. % 100 | tostring | if length < 2 then "0" + . else . end)")",
     @sh "h5_pct=\($h5p)", @sh "h5_eta=\($h5e)",
     @sh "d7_pct=\($d7p)", @sh "d7_eta=\($d7e)"
 ')"
 
-# Prompt cache TTL countdown: time left since the last API response, using a
-# 1h TTL when that response wrote 1h cache entries, else the default 5m.
-cache_left=""
+# Session new tokens: input + cache writes + output over every API call of
+# the main transcript and its subagents. Cache reads are left out: they re-count
+# the whole context on every call, so they measure context size, not work. Each
+# content block is its own transcript line repeating the usage, so dedupe by
+# message id. Whole transcripts are read, so the sum is cached next to the
+# transcript and only recomputed when it or a subagent transcript is newer.
+tokens=""
 if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-  cache_left=$(tail -n 200 "$transcript" | grep '"type":"assistant"' | jq -rn '
-    last(inputs | select(.type == "assistant"))
-    | (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)
-      + (if (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) > 0
-         then 3600 else 300 end)
-      - (now | floor)
-    | if . < 0 then 0 else . end' 2>/dev/null)
+  tok_cache="${transcript%.jsonl}.statusline-tokens"
+  stale=""
+  if [ ! -f "$tok_cache" ] || [ "$transcript" -nt "$tok_cache" ]; then
+    stale=1
+  else
+    for f in "${transcript%.jsonl}"/subagents/*.jsonl; do
+      [ "$f" -nt "$tok_cache" ] && { stale=1; break; }
+    done
+  fi
+  if [ -n "$stale" ]; then
+    set -- "$transcript"
+    for f in "${transcript%.jsonl}"/subagents/*.jsonl; do
+      [ -f "$f" ] && set -- "$@" "$f"
+    done
+    tokens=$(grep -h '"usage"' "$@" | jq -rn '
+      reduce (inputs | select(.type == "assistant" and .message.usage != null)) as $e
+        ({}; .[$e.message.id] = $e.message.usage)
+      | [.[] | (.input_tokens // 0) + (.output_tokens // 0)
+               + (.cache_creation_input_tokens // 0)]
+      | add // 0 | . / 1000 | round | "\(.)k"' 2>/dev/null)
+    { printf '%s\n' "$tokens" > "$tok_cache"; } 2>/dev/null
+  else
+    read -r tokens < "$tok_cache"
+  fi
 fi
 
 # Sandbox state. Neither stdin nor the hook payloads expose it, so read
@@ -87,7 +108,7 @@ esc=$(printf '\033')
 reset="${esc}[0m"
 cyan="${esc}[36m"          # model
 gray="${esc}[90m"          # brightBlack: context bar + separators
-brightGreen="${esc}[92m"   # tokens-cached
+brightGreen="${esc}[92m"   # session tokens + cost
 green="${esc}[32m"         # sandboxed / rate limit ok
 blue="${esc}[34m"          # sandbox state: unsandboxed
 magenta="${esc}[35m"       # git-branch
@@ -169,13 +190,13 @@ else
   out="${out}${sep}${blue}unsandboxed${reset}"
 fi
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
-out="${out}${sep}${brightGreen}cached:${cached_h}${reset}"
 if [ -n "$cache_left" ]; then
   if [ "$cache_left" -eq 0 ]; then cc="$red"
   elif [ "$cache_left" -lt 60 ]; then cc="$yellow"
   else cc="$green"; fi
   out="${out} ${cc}$((cache_left / 60)):$(( cache_left % 60 / 10 ))$(( cache_left % 10 ))${reset}"
 fi
+out="${out}${sep}${brightGreen}${tokens:+${tokens} }\$${cost}${reset}"
 limit_widget 5h "$h5_pct" "$h5_eta"
 [ -n "$widget" ] && out="${out}${sep}${widget}"
 limit_widget 7d "$d7_pct" "$d7_eta"
