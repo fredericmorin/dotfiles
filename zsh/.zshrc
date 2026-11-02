@@ -89,9 +89,6 @@ with-claude-vault() {
   t=$(security find-generic-password -a "$USER" -s op-agent-service-account -w) || return 1
   OP_SERVICE_ACCOUNT_TOKEN=$t "$@"
 }
-claude-brain() {
-  (cd ~/perso/brain && with-claude-vault claude "$@")
-}
 
 
 # uv tools install path. added first -> lowest priority
