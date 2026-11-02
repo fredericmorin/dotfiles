@@ -15,7 +15,7 @@
 #     Accepts [::1] and link-local addresses with a zone (fe80::1%en0); the zone must reach ping.
 #   - ts://NAME: tailscale ping -c 1 --until-direct=false --timeout=...; the
 #     CLI is found on PATH or in /Applications/Tailscale.app (often only a shell
-#     alias). NAME is resolved once at startup; an unknown name stops with the CLI's error.
+#     alias). NAME is resolved with `tailscale ip` on every probe; a failed lookup is DNS.
 #     VIA shows only the kind of link, never peer endpoints: "direct" or "peer-relay"
 #     (green), DERP(region) or any unrecognised value exactly as printed (yellow).
 #     Only an IP:port endpoint is labelled direct.
@@ -285,9 +285,13 @@ def tailscale_link(via: str) -> str:
     return via
 
 
-def probe_tailscale(cli: str, ip: str, timeout: float) -> Result:
+def probe_tailscale(cli: str, name: str, timeout: float) -> Result:
     # Disco ping through tailscaled: answers even when the peer's firewall drops ICMP.
     # Output formats are from tailscale 1.104 (cmd/tailscale/cli/ping.go), checked against the real CLI.
+    try:
+        ip = tailscale_ip(cli, name, timeout)
+    except ValueError as e:
+        return DNS_ERR, None, str(e), ""
     address = ip
     timeout_ms = max(1, round(timeout * 1000))
     cmd = [cli, "ping", "-c", "1", "--until-direct=false", "--timeout=%dms" % timeout_ms, ip]
@@ -595,7 +599,7 @@ def tailscale_cli() -> str:
     return cli
 
 
-def tailscale_ip(cli: str, name: str) -> str:
+def tailscale_ip(cli: str, name: str, timeout: float) -> str:
     """Return the Tailscale IPv4 address of a tailnet machine; raises ValueError if it can't."""
     try:
         proc = subprocess.run(
@@ -603,7 +607,7 @@ def tailscale_ip(cli: str, name: str) -> str:
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=5,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         raise ValueError("tailscale ip timed out")
@@ -645,9 +649,8 @@ def parse_target(arg: str) -> Tuple[Callable[[float], Result], bool]:
         name = rest.rstrip("/")
         if not name:
             raise ValueError("missing name")
-        # Look the name up once, so a typo fails at startup instead of filling a row with errors.
-        cli = tailscale_cli()
-        return functools.partial(probe_tailscale, cli, tailscale_ip(cli, name)), True
+        # Resolved on every probe, so a machine that joins the tailnet later shows up.
+        return functools.partial(probe_tailscale, tailscale_cli(), name), True
 
     if scheme in ("http", "https"):
         parts = urllib.parse.urlsplit(arg)
