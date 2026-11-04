@@ -14,14 +14,18 @@ STOWS += iTerm2
 # package into ~/.claude-personal too (no folding: Claude writes its state in that dir).
 CLAUDE_PERSONAL_DIR := $(wildcard $(HOME)/.claude-personal)
 
+# Claude Code leaves empty .claude/.cc-writes scratch dirs next to files it edits; never stow them.
+STOW_IGNORES := --ignore='\.cc-writes'
+CLAUDE_IGNORES := $(STOW_IGNORES) --ignore='/\.claude'
+
 .PHONY: install
 install:
-	stow -v ${STOWS:claude=}
+	stow -v $(STOW_IGNORES) ${STOWS:claude=}
 ifeq ($(CLAUDE_PERSONAL_DIR),)
-	stow -v claude
+	stow -v $(CLAUDE_IGNORES) claude
 else
-	stow -v --ignore='settings\.json' claude
-	stow -v --no-folding -d claude -t ${CLAUDE_PERSONAL_DIR} .claude
+	stow -v $(CLAUDE_IGNORES) --ignore='settings\.json' claude
+	stow -v --no-folding $(STOW_IGNORES) --ignore='\.claude' -d claude -t ${CLAUDE_PERSONAL_DIR} .claude
 endif
 
 #####################
