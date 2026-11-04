@@ -3,17 +3,20 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--background] [-- prompt...]
+usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--fresh] [-m <model>] [--background] [-- prompt...]
        fork.sh --args-stdin <<'EOF'
        [branch] [options] [-- prompt...]
        EOF
 
-Fork the current Claude Code session into a new Supacode worktree.
+Fork the current Claude Code session (or start a fresh one with --fresh) in a new
+Supacode worktree.
   branch        new branch name (default: <current-branch>_fork)
   -B, --base    base ref for the new worktree (default: current HEAD)
   -n, --name    display name for the forked Claude session
   -s, --same    fork into a new tab of the current worktree instead of a new
                 worktree (no branch or base allowed)
+  --fresh       start a new Claude session instead of forking this one's history
+  -m, --model   model for the new session (passed as claude --model, e.g. opus)
   --background  create the worktree/tab without stealing focus
   -- prompt...  free text sent to the forked session as its first message;
                 any words after the branch are taken as the prompt too
@@ -58,12 +61,14 @@ if [ "${1:-}" = "--args-stdin" ]; then
   set -- ${ARGV[@]+"${ARGV[@]}"}
 fi
 
-BRANCH="" BASE="" NAME="" PROMPT="" SAME="" BG=()
+BRANCH="" BASE="" NAME="" PROMPT="" SAME="" FRESH="" MODEL="" BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -B|--base) BASE="$2"; shift 2 ;;
     -n|--name) NAME="$2"; shift 2 ;;
     -s|--same) SAME=1; shift ;;
+    --fresh) FRESH=1; shift ;;
+    -m|--model) MODEL="$2"; shift 2 ;;
     --background) BG=(--background); shift ;;
     -h|--help) usage ;;
     --) shift; PROMPT="$*"; break ;;
@@ -101,11 +106,11 @@ fi
 
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SID=""
-if [ -n "${CLAUDE_PID:-}" ] && [ -r "$CFG/sessions/$CLAUDE_PID.json" ]; then
+if [ -z "$FRESH" ] && [ -n "${CLAUDE_PID:-}" ] && [ -r "$CFG/sessions/$CLAUDE_PID.json" ]; then
   SID=$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$CFG/sessions/$CLAUDE_PID.json" | head -n 1)
 fi
-[ -n "$SID" ] || SID="${CLAUDE_CODE_SESSION_ID:-}"
-[ -n "$SID" ] || {
+[ -n "$FRESH" ] || [ -n "$SID" ] || SID="${CLAUDE_CODE_SESSION_ID:-}"
+[ -n "$FRESH" ] || [ -n "$SID" ] || {
   echo "error: could not resolve the current Claude session id (run from inside a Claude Code session)" >&2
   exit 1
 }
@@ -147,7 +152,12 @@ fi
 }
 WT_PATH=$(printf '%b' "${WT_ID//%/\\x}")
 
-CMD="claude --resume $SID --fork-session"
+if [ -n "$FRESH" ]; then
+  CMD="claude"
+else
+  CMD="claude --resume $SID --fork-session"
+fi
+[ -z "$MODEL" ] || CMD="$CMD --model $(shq "$MODEL")"
 [ -z "$NAME" ] || CMD="$CMD --name $(shq "$NAME")"
 if [ -n "$PROMPT" ]; then
   PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/supacode-fork"
@@ -156,11 +166,19 @@ if [ -n "$PROMPT" ]; then
   printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
   CMD="$CMD \"\$(cat $(shq "$PROMPT_FILE"))\""
 fi
-TITLE="claude fork${NAME:+: $NAME}"
+if [ -n "$FRESH" ]; then
+  TITLE="claude${NAME:+: $NAME}"
+else
+  TITLE="claude fork${NAME:+: $NAME}"
+fi
 
 TAB_ID=$(supacode tab new -w "$WT_ID" -i "$CMD" --title "$TITLE" ${BG[@]+"${BG[@]}"})
 
-echo "forked session: $SID"
+if [ -n "$FRESH" ]; then
+  echo "session:        fresh"
+else
+  echo "forked session: $SID"
+fi
 echo "worktree:       $WT_PATH"
 if [ -n "$SAME" ]; then
   echo "branch:         $BRANCH (same worktree)"
