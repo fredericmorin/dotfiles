@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--fresh] [-m <model>] [--background] [-- prompt...]
+usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--fresh] [-r <repo>] [-m <model>] [--background] [-- prompt...]
        fork.sh --args-stdin <<'EOF'
        [branch] [options] [-- prompt...]
        EOF
@@ -16,6 +16,8 @@ Supacode worktree.
   -s, --same    fork into a new tab of the current worktree instead of a new
                 worktree (no branch or base allowed)
   --fresh       start a new Claude session instead of forking this one's history
+  -r, --repo    create the worktree in another Supacode repo, given as a path
+                or a folder name from `supacode repo list` (needs --fresh)
   -m, --model   model for the new session (passed as claude --model, e.g. opus)
   --background  create the worktree/tab without stealing focus
   -- prompt...  free text sent to the forked session as its first message;
@@ -61,13 +63,14 @@ if [ "${1:-}" = "--args-stdin" ]; then
   set -- ${ARGV[@]+"${ARGV[@]}"}
 fi
 
-BRANCH="" BASE="" NAME="" PROMPT="" SAME="" FRESH="" MODEL="" BG=()
+BRANCH="" BASE="" NAME="" PROMPT="" SAME="" FRESH="" MODEL="" REPO="" BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -B|--base) BASE="$2"; shift 2 ;;
     -n|--name) NAME="$2"; shift 2 ;;
     -s|--same) SAME=1; shift ;;
     --fresh) FRESH=1; shift ;;
+    -r|--repo) REPO="$2"; shift 2 ;;
     -m|--model) MODEL="$2"; shift 2 ;;
     --background) BG=(--background); shift ;;
     -h|--help) usage ;;
@@ -85,14 +88,55 @@ done
   exit 2
 }
 
+# claude --resume finds sessions by project dir, so history can't follow into another repo.
+[ -z "$REPO" ] || [ -n "$FRESH" ] || {
+  echo "error: --repo needs --fresh; a forked session can't resume in another repo" >&2
+  exit 2
+}
+[ -z "$REPO" ] || [ -z "$SAME" ] || {
+  echo "error: --repo and --same can't be combined" >&2
+  exit 2
+}
+
 command -v supacode >/dev/null 2>&1 || {
   echo "error: supacode CLI not found; run this inside a Supacode terminal" >&2
   exit 1
 }
-[ -n "${SUPACODE_REPO_ID:-}" ] || {
-  echo "error: SUPACODE_REPO_ID is unset; run this inside a Supacode terminal" >&2
-  exit 1
-}
+
+if [ -n "$REPO" ]; then
+  # --args-stdin skips shell tilde expansion.
+  case "$REPO" in "~"|"~/"*) REPO="$HOME${REPO#\~}" ;; esac
+  WANT=""
+  if [ -d "$REPO" ]; then WANT="$(cd "$REPO" && pwd -P)/"; fi
+  REPO_ID="" REPO_PATH="" MATCHES=()
+  while IFS= read -r ID; do
+    P=$(printf '%b' "${ID//%/\\x}")
+    if [ -n "$WANT" ]; then
+      [ "$P" = "$WANT" ] && MATCHES+=("$ID")
+    else
+      B="${P%/}"; B="${B##*/}"
+      [ "$B" = "$REPO" ] && MATCHES+=("$ID")
+    fi
+  done < <(supacode repo list)
+  if [ "${#MATCHES[@]}" -eq 0 ]; then
+    echo "error: no Supacode repo matches '$REPO'; add it with: supacode repo open <path>" >&2
+    exit 1
+  fi
+  if [ "${#MATCHES[@]}" -gt 1 ]; then
+    echo "error: '$REPO' matches several Supacode repos; pass a path instead:" >&2
+    for ID in "${MATCHES[@]}"; do printf '  %b\n' "${ID//%/\\x}" >&2; done
+    exit 1
+  fi
+  REPO_ID="${MATCHES[0]}"
+  REPO_PATH=$(printf '%b' "${REPO_ID//%/\\x}")
+  cd "$REPO_PATH"
+else
+  [ -n "${SUPACODE_REPO_ID:-}" ] || {
+    echo "error: SUPACODE_REPO_ID is unset; run this inside a Supacode terminal" >&2
+    exit 1
+  }
+  REPO_ID="$SUPACODE_REPO_ID"
+fi
 
 # The session's cwd is authoritative: SUPACODE_WORKTREE_ID is set when the tab
 # opens and goes stale once Supacode moves the session to another worktree.
@@ -144,7 +188,7 @@ if [ -z "$BRANCH" ]; then
   BRANCH="$CANDIDATE"
 fi
 
-[ -n "$SAME" ] || WT_ID=$(supacode repo worktree-new -r "$SUPACODE_REPO_ID" \
+[ -n "$SAME" ] || WT_ID=$(supacode repo worktree-new -r "$REPO_ID" \
   --branch "$BRANCH" --base "$BASE" --no-upstream ${BG[@]+"${BG[@]}"})
 [ -n "$WT_ID" ] || {
   echo "error: supacode repo worktree-new returned no worktree id" >&2
@@ -179,6 +223,7 @@ if [ -n "$FRESH" ]; then
 else
   echo "forked session: $SID"
 fi
+[ -z "$REPO" ] || echo "repo:           $REPO_PATH"
 echo "worktree:       $WT_PATH"
 if [ -n "$SAME" ]; then
   echo "branch:         $BRANCH (same worktree)"
