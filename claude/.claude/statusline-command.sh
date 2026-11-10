@@ -115,7 +115,7 @@ magenta="${esc}[35m"       # git-branch
 yellow="${esc}[33m"        # git-changes
 red="${esc}[31m"           # rate limit high
 
-sep="${gray} | ${reset}"
+sep="${gray}|${reset}"
 
 # --- rate limit windows ------------------------------------------------------
 # "18% 2h13m" — percentage used of the window, plus time until it resets.
@@ -182,13 +182,13 @@ fi
 
 # --- assemble ----------------------------------------------------------------
 out="${sid}"
-out="${out}${sep}${cyan}${model}${reset}"
-[ -n "$effort" ] && out="${out} ${effort}"
 if [ "$sandbox_enabled" = "true" ]; then
   out="${out}${sep}${green}sandboxed${reset}"
 else
   out="${out}${sep}${blue}unsandboxed${reset}"
 fi
+out="${out}${sep}${cyan}${model}${reset}"
+[ -n "$effort" ] && out="${out} ${effort}"
 out="${out}${sep}${gray}${bar} ${used}%${reset}"
 if [ -n "$cache_left" ]; then
   if [ "$cache_left" -eq 0 ]; then cc="$red"
