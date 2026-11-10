@@ -1,7 +1,7 @@
 ---
 name: supacode-new
 description: Start a fresh Claude Code session (no history) in a new Supacode worktree, with a new narrowly scoped prompt as its first message. Use when the user asks to start, spawn, or hand off a task to a new session or worktree without forking this one; also for "/supacode-new [branch] -- prompt".
-argument-hint: "[branch] [-B base-ref] [-n session-name] [-s|--same] [-r repo] [-m model] [--background] [-- prompt...]"
+argument-hint: "[branch] [-B base-ref] [-n session-name] [-s|--same] [-r repo] [-m model] [--effort level] [--background] [-- prompt...]"
 ---
 
 # Start a fresh session in a new worktree

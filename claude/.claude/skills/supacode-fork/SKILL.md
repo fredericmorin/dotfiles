@@ -1,7 +1,7 @@
 ---
 name: supacode-fork
 description: Fork this Claude Code session, history included, into a new Supacode tab, in a new worktree (default) or the current one (--same). Use when the user asks to fork the session; to start a fresh session with a new prompt instead, use supacode-new.
-argument-hint: "[branch] [-B base-ref] [-n session-name] [-s|--same] [-m model] [--background] [-- prompt...]"
+argument-hint: "[branch] [-B base-ref] [-n session-name] [-s|--same] [-m model] [--effort level] [--background] [-- prompt...]"
 ---
 
 ```!

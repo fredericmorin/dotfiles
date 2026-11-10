@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--fresh] [-r <repo>] [-m <model>] [--background] [-- prompt...]
+usage: fork.sh [branch] [-B <base-ref>] [-n <session-name>] [-s] [--fresh] [-r <repo>] [-m <model>] [--effort <level>] [--background] [-- prompt...]
        fork.sh --args-stdin <<'EOF'
        [branch] [options] [-- prompt...]
        EOF
@@ -19,6 +19,7 @@ Supacode worktree.
   -r, --repo    create the worktree in another Supacode repo, given as a path
                 or a folder name from `supacode repo list` (needs --fresh)
   -m, --model   model for the new session (passed as claude --model, e.g. opus)
+  --effort      effort level for the new session (passed as claude --effort, e.g. medium)
   --background  create the worktree/tab without stealing focus
   -- prompt...  free text sent to the forked session as its first message;
                 any words after the branch are taken as the prompt too
@@ -63,7 +64,7 @@ if [ "${1:-}" = "--args-stdin" ]; then
   set -- ${ARGV[@]+"${ARGV[@]}"}
 fi
 
-BRANCH="" BASE="" NAME="" PROMPT="" SAME="" FRESH="" MODEL="" REPO="" BG=()
+BRANCH="" BASE="" NAME="" PROMPT="" SAME="" FRESH="" MODEL="" EFFORT="" REPO="" BG=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -B|--base) BASE="$2"; shift 2 ;;
@@ -72,6 +73,7 @@ while [ $# -gt 0 ]; do
     --fresh) FRESH=1; shift ;;
     -r|--repo) REPO="$2"; shift 2 ;;
     -m|--model) MODEL="$2"; shift 2 ;;
+    --effort) EFFORT="$2"; shift 2 ;;
     --background) BG=(--background); shift ;;
     -h|--help) usage ;;
     --) shift; PROMPT="$*"; break ;;
@@ -202,6 +204,7 @@ else
   CMD="claude --resume $SID --fork-session"
 fi
 [ -z "$MODEL" ] || CMD="$CMD --model $(shq "$MODEL")"
+[ -z "$EFFORT" ] || CMD="$CMD --effort $(shq "$EFFORT")"
 [ -z "$NAME" ] || CMD="$CMD --name $(shq "$NAME")"
 if [ -n "$PROMPT" ]; then
   PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/supacode-fork"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: spawn.sh <plan.md> [--step N] [--only 1,3] [-B <base-ref>] [--fork] [--background] [--dry-run]
+usage: spawn.sh <plan.md> [--step N] [--only 1,3] [-B <base-ref>] [--fork] [--background] [--model <m>] [--effort <level>] [--dry-run]
 
 Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a fan-out plan.
   plan.md       the plan file; sidecars are <plan-stem>_step<N>.md (single unit)
@@ -16,16 +16,18 @@ Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a
   --fork        fork the current Claude session into each worktree instead of a fresh one
   --background  create worktrees/tabs without stealing focus
   --model       model for the spawned sessions (passed as claude --model, e.g. opus)
+  --effort      effort level for the spawned sessions (passed as claude --effort, e.g. medium)
   --dry-run     print what would be spawned and exit
 USAGE
   exit 2
 }
 
-PLAN="" STEP="" ONLY="" BASE="" FORK=0 DRY=0 BG=() MODEL=""
+PLAN="" STEP="" ONLY="" BASE="" FORK=0 DRY=0 BG=() MODEL="" EFFORT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --step) STEP="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
+    --effort) EFFORT="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     -B|--base) BASE="$2"; shift 2 ;;
     --fork) FORK=1; shift ;;
@@ -154,6 +156,7 @@ for SC in "${SIDECARS[@]}"; do
 
   MODEL_OPT=""
   [ -z "$MODEL" ] || MODEL_OPT=" --model $(shq "$MODEL")"
+  [ -z "$EFFORT" ] || MODEL_OPT="$MODEL_OPT --effort $(shq "$EFFORT")"
   if [ "$FORK" -eq 1 ]; then
     CMD="claude --resume $SID --fork-session$MODEL_OPT -n $(shq "$BRANCH") \"\$(cat $(shq "$PROMPT_FILE"))\""
   else

@@ -1,7 +1,7 @@
 ---
 name: fanout-run-step
 description: Spawn one Supacode worktree and one Claude Code session per sidecar prompt of one step of a fan-out plan written with fanout-plan. Use after the user has reviewed the plan and says go, spawn, fan out, or launch the sessions; also for "/fanout-run-step <plan>".
-argument-hint: "<docs/specs/plan.md> [--step N] [--only 1,3] [-B base-ref] [--fork] [--background]"
+argument-hint: "<docs/specs/plan.md> [--step N] [--only 1,3] [-B base-ref] [--fork] [--background] [--model m] [--effort level]"
 ---
 
 # Fan out one step of a reviewed plan
