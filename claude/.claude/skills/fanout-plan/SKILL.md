@@ -1,11 +1,11 @@
 ---
 name: fanout-plan
-description: Use when writing a plan or spec to a docs/specs file, and the work splits into several independently-shippable units — sequential steps, each either one unit or a group of parts that can be worked in parallel — writes the plan plus one sidecar prompt file per unit, each ready to paste into a separate Claude session on its own branch
+description: Use when writing a fan-out plan: the work splits into several independently-shippable units — sequential steps, each either one unit or a group of parts that can be worked in parallel — writes the plan plus one sidecar prompt file per unit, each ready to paste into a separate Claude session on its own branch
 ---
 
 # Fan-out plans with sidecar session prompts
 
-Write the plan to the repo's spec directory. When the work splits into three or more
+Write the plan to `tmp/` at the repo root. When the work splits into three or more
 units that each merit their own branch and MR, also write one sidecar per unit: a
 self-contained prompt for a fresh Claude session with zero conversational context. Below
 that threshold, write one plan with ordered phases and no sidecars. When the gate passes,
@@ -13,13 +13,13 @@ the sidecars are part of the deliverable.
 
 ## Session mode
 
-Invoking this skill is the user's request, and approval, to write the spec. That satisfies
-any repo rule to use plan mode for specs, so never call `EnterPlanMode` yourself.
+Invoking this skill is the user's request, and approval, to write the plan. That satisfies
+any repo rule to use plan mode for plans or specs, so never call `EnterPlanMode` yourself.
 
 - Not in plan mode: write the files directly.
 - In plan mode: writes are blocked. Shape in the plan file (plan prose, step table, a
   one-line outline per sidecar: header, branch, scope) and call `ExitPlanMode`. Once
-  approved, write the plan and sidecars to the spec directory without asking again.
+  approved, write the plan and sidecars to `tmp/` without asking again.
 - A plan already exists in the session: reshape it into steps, groups, and parts. Don't
   re-explore what it already settles.
 
@@ -52,29 +52,28 @@ mechanical one.
 
 ## Layout
 
-Follow the repo's spec filename convention (check `CLAUDE.md`, existing specs, and any
-lint that guards the directory). Sidecars are flat siblings of the plan, never a
+Plans go in `tmp/` at the repo root. Sidecars are flat siblings of the plan, never a
 subdirectory, and no README index:
 
 ```
-docs/specs/2026-08-07_<title>.md
-docs/specs/2026-08-07_<title>_step1.md
-docs/specs/2026-08-07_<title>_step2_part1.md
-docs/specs/2026-08-07_<title>_step2_part2.md
+tmp/<title>.md
+tmp/<title>_step1.md
+tmp/<title>_step2_part1.md
+tmp/<title>_step2_part2.md
 ```
 
 Numbering starts at 1, unpadded.
 
 ## The plan file
 
-Standard spec prose, plus:
+Standard plan prose, plus:
 
-- Where things stand: what already landed, evidence of what is left, linked prior specs.
+- Where things stand: what already landed, evidence of what is left, linked prior plans or docs.
 - A step table in landing order: step, part, sidecar link, scope, size, difficulty.
 - Under the table, one launch line per step, as the script command so it runs without a
-  Claude turn: `~/.claude/skills/fanout-run-step/spawn.sh docs/specs/<plan>.md --step 1`
+  Claude turn: `~/.claude/skills/fanout-run-step/spawn.sh tmp/<plan>.md --step 1`
   for step 1, and `git fetch origin && ~/.claude/skills/fanout-run-step/spawn.sh
-  docs/specs/<plan>.md --step N -B origin/master` for later steps, run only after step
+  tmp/<plan>.md --step N -B origin/master` for later steps, run only after step
   N−1's MRs merge.
 - One line per step boundary naming the dependency that forces it.
 - The shared files each group touches.
@@ -102,7 +101,8 @@ A single-unit step uses `# Step 3 — <what it covers>` and branch `<prefix>_ste
 
 The prompt must stand alone. Cover:
 
-- The task, and repo-relative paths to the plan and background specs.
+- The task, the absolute path to the plan (`tmp/` is not in other worktrees), and
+  repo-relative paths to background docs.
 - Its place in the sequence: for step N > 1, what it waits on and to branch from `master`
   only after that MR merges; for a part, its siblings and the shared files.
 - A worked example to copy: a commit sha when one is known, otherwise the `git log`
@@ -123,6 +123,6 @@ a stop condition as an acceptable outcome.
 
 ## Finishing
 
-Run the docs lint, check sidecar links resolve, and reread one sidecar as a stranger.
+Check sidecar links resolve and reread one sidecar as a stranger.
 Report the file list, the step table, and the per-step launch lines. Each one starts one
 worktree and session per sidecar of that step, once the user has reviewed it.
