@@ -86,11 +86,13 @@ Standard plan prose, plus:
   exact command, scope, done when, size, difficulty.
 - Under the table, one launch line per step that has sidecars, as the script command so
   it runs without a Claude turn:
-  `~/.claude/skills/fanout-run-step/spawn.sh tmp/<plan>.md --step 1`
+  `~/.claude/skills/fanout-run-step/spawn.sh tmp/<plan>.md --step 1 --model opus --effort medium --background`
   for step 1, and `git fetch origin && ~/.claude/skills/fanout-run-step/spawn.sh
-  tmp/<plan>.md --step N -B origin/master` for later steps, run only once step
-  N−1 is done by its own exit condition. Always pass `--step`: the script's default
-  skips steps that have no sidecar.
+  tmp/<plan>.md --step N -B origin/master --model opus --effort medium --background`
+  for later steps, run only once step N−1 is done by its own exit condition.
+  Always pass `--step`: the script's default skips steps that have no sidecar.
+  Keep `--model opus --effort medium --background` unless the user asks for
+  another model, effort, or a foreground launch.
 - One line per step boundary naming the dependency that forces it.
 - The shared files each group touches.
 - Out of scope, with reasons, including near-misses.
