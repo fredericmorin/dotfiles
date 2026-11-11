@@ -1,7 +1,4 @@
 {
-  "permissions": {
-    "defaultMode": "auto"
-  },
   "cleanupPeriodDays": 90,
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
@@ -9,6 +6,9 @@
     "ENABLE_CLAUDEAI_MCP_SERVERS": "true",
     "ENABLE_PROMPT_CACHING_1H": "1",
     "ENABLE_TOOL_SEARCH": "true"
+  },
+  "permissions": {
+    "defaultMode": "auto"
   },
   "model": "opus[1m]",
   "hooks": {
@@ -163,8 +163,8 @@
   "preferredNotifChannel": "auto",
   "autoCompactEnabled": false,
   "switchModelsOnFlag": false,
-  "showTurnDuration": true,
   "autoContinueAtUsageLimit": false,
+  "showTurnDuration": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true
 }
