@@ -53,15 +53,15 @@ step number.
 Derive the shape from real dependencies. Anything that blocks on another unit goes in a
 later step; anything that only conflicts mechanically is a part of the same step. Every
 step boundary costs a wait, so each needs a nameable dependency. A pure chain with
-no groups is a valid outcome — say so.
+no groups is a valid outcome — say so. Keep parts comparable in size, keep edits to the
+same file within one part, and order parts by difficulty so the user can start with the
+mechanical one.
 
 Merging is rarely the exit condition. For a code step, ask what the next step actually
 needs: usually the change running in production (deployed, migrated, applied), which
 comes after the merge. Whatever has to happen between two pieces of work and needs no
 code — a script run, a migration command, a soak — is a step of its own, never a
-footnote in an MR description. Keep parts comparable in size, keep edits to the
-same file within one part, and order parts by difficulty so the user can start with the
-mechanical one.
+footnote in an MR description.
 
 ## Layout
 
