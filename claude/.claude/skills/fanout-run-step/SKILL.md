@@ -29,6 +29,10 @@ It works in the app it runs in, shown as `app:` in its output:
   by the plan's own exit condition (merged is often not enough: deployed,
   migrated, a script run), then use `-B origin/master` after a fetch. If it
   is not done, say so and stop.
+- Only code units have sidecars. A step's command and wait units are run
+  from their rows in the plan's step table, not spawned, and the step is done
+  only once they pass their checks too. A step with no sidecar is never
+  spawned: hand over its commands from the plan instead.
 - Uncommitted plans still work, because the sessions get absolute paths.
 - Report the spawned branches and worktree paths. Each session opens its own MR.
 - When you hand over the next step, give the script command, not the

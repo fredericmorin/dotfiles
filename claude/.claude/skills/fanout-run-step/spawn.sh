@@ -191,7 +191,7 @@ for SC in "${SIDECARS[@]}"; do
       echo "Plan: \`$PLAN_ABS\`. This unit's sidecar: \`$SC\`."
     fi
     if [ -n "$P" ]; then
-      echo "Other parts of step $S run in parallel on their own branches; expect mechanical rebase conflicts in the shared files the plan names."
+      echo "Other parts of step $S run in parallel: sessions on their own branches, and any command parts the user runs (see the plan's step table). Expect mechanical rebase conflicts in the shared files the plan names."
     fi
     echo
     echo "Follow the prompt below. When the work is done and verified, open the MR with the commit-and-open-mr skill."
@@ -241,7 +241,7 @@ for SC in "${SIDECARS[@]}"; do
   fi
   printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SPAWNED" "$WT_PATH (tab $TAB_ID)"
 done
-[ "$SEEN" -eq 1 ] || { echo "error: no sidecar for step $STEP${ONLY:+ with parts $ONLY}" >&2; exit 1; }
+[ "$SEEN" -eq 1 ] || { echo "error: no sidecar for step $STEP${ONLY:+ with parts $ONLY} (command and wait units are run from the plan's step table, not spawned)" >&2; exit 1; }
 
 echo
 echo "base: $BASE_SHA${SID:+  (forked from session $SID)}"
