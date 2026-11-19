@@ -3,18 +3,22 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: fork.sh [-n <name>] [--fresh] [-m <model>] [--effort <level>] [--background] [-- prompt...]
+usage: fork.sh [-b <branch>] [-B <base-ref>] [-n <name>] [--fresh] [-m <model>] [--effort <level>] [-- prompt...]
        fork.sh --args-stdin <<'EOF'
        [options] [-- prompt...]
        EOF
 
 Fork the current Claude Code session (or start a fresh one with --fresh) in a new
-Herdr tab of the space this session runs in, in the session's folder.
+worktree of the session's repo: a new Herdr space made by Herdr's worktree dialog,
+so the project's projects.json setup runs before Claude starts.
+  -b, --branch  new branch for the worktree (default: the --name, else
+                <current-branch>_fork; numbered when taken)
+  -B, --base    base ref for the new branch (default: origin's default branch, origin/HEAD)
   -n, --name    tab name and Claude session name
   --fresh       start a new Claude session instead of forking this one's history
   -m, --model   model for the new session (passed as claude --model, e.g. opus)
   --effort      effort level for the new session (passed as claude --effort)
-  --background  add the tab without switching to it
+  --background  accepted, no effect: Herdr shows each new worktree space
   -- prompt...  free text sent to the new session as its first message;
                 any words that are not options are taken as the prompt too
   --args-stdin  read the whole argument string from stdin instead, so shell
@@ -56,14 +60,16 @@ if [ "${1:-}" = "--args-stdin" ]; then
   set -- ${ARGV[@]+"${ARGV[@]}"}
 fi
 
-NAME="" PROMPT="" FRESH="" MODEL="" EFFORT="" BG=""
+NAME="" PROMPT="" FRESH="" MODEL="" EFFORT="" BRANCH="" BASE=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    -b|--branch) BRANCH="$2"; shift 2 ;;
+    -B|--base) BASE="$2"; shift 2 ;;
     -n|--name) NAME="$2"; shift 2 ;;
     --fresh) FRESH=1; shift ;;
     -m|--model) MODEL="$2"; shift 2 ;;
     --effort) EFFORT="$2"; shift 2 ;;
-    --background) BG=1; shift ;;
+    --background) shift ;;
     -h|--help) usage ;;
     --) shift; PROMPT="$*"; break ;;
     -*) usage ;;
@@ -84,7 +90,7 @@ SPACE=$(hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.space"] // empty
   exit 1
 }
 
-# The session file records the folder Claude started in; --resume looks sessions up by it.
+# The session file records the folder Claude started in: the worktree branches from its checkout.
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SID="" FOLDER=""
 if [ -n "${CLAUDE_PID:-}" ] && [ -r "$CFG/sessions/$CLAUDE_PID.json" ]; then
@@ -106,21 +112,70 @@ CMD=(claude)
 # `--` keeps a prompt that starts with "-" from being read as an option.
 [ -z "$PROMPT" ] || CMD+=(-- "$PROMPT")
 
-ARGS=$(jq -n --arg space "$SPACE" --arg folder "$FOLDER" --arg name "$NAME" --arg bg "$BG" \
-  --argjson argv "$(printf '%s\0' "${CMD[@]}" | jq -Rs 'split("\u0000")[:-1]')" \
-  '{space: $space, folder: $folder, argv: $argv}
-   + (if $name != "" then {name: $name} else {} end)
-   + (if $bg != "" then {focus: false} else {} end)')
+# The worktree dialog has no base option: make the branch at the base, the dialog checks it out.
+cd "$FOLDER"
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: $FOLDER is not inside a git checkout" >&2
+  exit 1
+}
+if [ -z "$BASE" ]; then
+  BASE=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || {
+    echo "error: origin's default branch isn't known; run: git -C $REPO_ROOT remote set-head origin --auto (or pass -B)" >&2
+    exit 1
+  }
+fi
+BASE_SHA=$(git rev-parse --verify "$BASE^{commit}")
+if [ -z "$BRANCH" ]; then
+  if [ -n "$NAME" ]; then
+    BRANCH="$NAME"
+  else
+    CUR=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$CUR" = "HEAD" ]; then BRANCH="fork_$(date +%Y%m%d_%H%M%S)"; else BRANCH="${CUR}_fork"; fi
+  fi
+  CANDIDATE="$BRANCH" N=2
+  while git show-ref --verify --quiet "refs/heads/$CANDIDATE"; do
+    CANDIDATE="${BRANCH}${N}"; N=$((N + 1))
+  done
+  BRANCH="$CANDIDATE"
+fi
+git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || { echo "error: '$BRANCH' is not a valid branch name; pass -b <branch>" >&2; exit 1; }
+if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  echo "error: branch $BRANCH already exists" >&2
+  exit 1
+fi
+git branch --no-track "$BRANCH" "$BASE_SHA" >/dev/null
 
-OUT=$(herdr-app do tab.new "$ARGS")
+# herdr-app do can't pass props to a dialog: the worktree-request mod opens my-worktree with these.
+REQUEST="$HOME/.cache/herdr/worktree-request.json"
+mkdir -p "$(dirname "$REQUEST")"
+jq -n --arg space "$SPACE" --arg folder "$REPO_ROOT" --arg branch "$BRANCH" --arg name "$NAME" \
+  --argjson argv "$(printf '%s\0' "${CMD[@]}" | jq -Rs 'split("\u0000")[:-1]')" \
+  '{created: (now * 1000 | floor), space: $space, folder: $folder, branch: $branch, argv: $argv}
+   + (if $name != "" then {tab: $name} else {} end)' > "$REQUEST"
+herdr-app do mod.open --name worktree-request >/dev/null
+
+worktree_of() {
+  git worktree list --porcelain | awk -v ref="branch refs/heads/$1" '
+    /^worktree / { path = substr($0, 10) }
+    $0 == ref { print path; exit }'
+}
+# git worktree add can take a while on a big repo; the dialog shows any error.
+WT_PATH=""
+for _ in $(seq 300); do
+  WT_PATH=$(worktree_of "$BRANCH")
+  [ -z "$WT_PATH" ] || break
+  sleep 1
+done
+[ -n "$WT_PATH" ] || {
+  echo "error: no checkout of $BRANCH appeared; see Herdr's worktree dialog (branch $BRANCH is left at $BASE_SHA)" >&2
+  exit 1
+}
 
 if [ -n "$FRESH" ]; then
   echo "session:        fresh"
 else
   echo "forked session: $SID"
 fi
-echo "space:          $SPACE"
-echo "folder:         $FOLDER"
-echo "tab:            $(printf '%s' "$OUT" | jq -r '.tab // .')"
-echo "terminal:       $(printf '%s' "$OUT" | jq -r '.terminal // empty')"
+echo "branch:         $BRANCH (from $BASE, $BASE_SHA)"
+echo "worktree:       $WT_PATH (a new space, under the repo's space)"
 echo "command:        $(printf '%q ' "${CMD[@]}")"
