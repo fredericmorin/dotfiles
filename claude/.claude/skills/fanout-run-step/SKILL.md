@@ -19,6 +19,9 @@ It works in the app it runs in, shown as `app:` in its output:
   `worktree-request` mod) so the project's `projects.json` setup runs. The
   script makes the branch at the base ref first, because the dialog has no
   base option. `--background` has no effect there: each new space is shown.
+  Units go one at a time: the next dialog opens once the previous checkout is
+  complete. A unit whose dialog closed without creating anything fails within
+  ~15s and its branch is deleted, so rerunning with `--only` retries it.
 
 - Pass `--model opus --effort medium --background` by default, unless the user
   asks for another model, effort, or a foreground launch.

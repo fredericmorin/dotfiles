@@ -117,23 +117,60 @@ worktree_of() {
 
 # Herdr: opens its worktree dialog with props through the worktree-request mod, then waits
 # for the checkout. The dialog has no base ref, so the branch is made at the base first and
-# the dialog checks it out. Prints the checkout's path.
+# the dialog checks it out. Returns once the checkout is complete, so the next unit's dialog
+# doesn't open (and load slowly) while this one's checkout runs. Prints the checkout's path,
+# or why it failed.
 herdr_spawn() {
   local branch="$1" prompt_file="$2"; shift 2
-  local request="$HOME/.cache/herdr/worktree-request.json" argv path=""
-  git branch "$branch" "$BASE_SHA" >/dev/null || return 1
+  local request="$HOME/.cache/herdr/worktree-request.json" argv path="" closed=0
+  git branch "$branch" "$BASE_SHA" >/dev/null || { echo "couldn't make the branch"; return 1; }
   argv=$(printf '%s\0' "$@" -- "$(cat "$prompt_file")" | jq -Rs 'split("\u0000")[:-1]')
   mkdir -p "$(dirname "$request")"
   jq -n --arg space "$HERDR_SPACE" --arg folder "$REPO_ROOT" --arg branch "$branch" --argjson argv "$argv" \
     '{created: (now * 1000 | floor), space: $space, folder: $folder, branch: $branch, argv: $argv}' > "$request"
-  herdr-app do mod.open --name worktree-request >/dev/null || return 1
-  # git worktree add can take a while on a big repo; the dialog shows any error.
-  for _ in $(seq 300); do
+  herdr-app do mod.open --name worktree-request >/dev/null || { echo "herdr-app couldn't open worktree-request"; return 1; }
+  # The dialog queues the creation and closes; the queued job registers the checkout within
+  # seconds. A dialog closed for 15s with no checkout was dismissed before it queued anything.
+  while [ -z "$path" ]; do
     path=$(worktree_of "$branch")
-    [ -z "$path" ] || { echo "$path"; return 0; }
+    [ -z "$path" ] || break
+    if dialog_open; then closed=0; else closed=$((closed + 1)); fi
+    [ "$closed" -lt 15 ] || { unmake "$branch"; echo "the worktree dialog closed without creating it; see Herdr's toasts"; return 1; }
     sleep 1
   done
-  return 1
+  # git worktree add can take a while on a big repo (the job gives it 600s).
+  for _ in $(seq 600); do
+    initializing "$branch" || break
+    sleep 1
+  done
+  initializing "$branch" && { echo "git worktree add still running after 600s in $path"; return 1; }
+  [ -n "$(worktree_of "$branch")" ] || { unmake "$branch"; echo "git worktree add failed; see Herdr's toasts"; return 1; }
+  echo "$path"
+}
+
+# Deletes a branch this script made when no checkout came of it, so a rerun retries the unit
+# instead of skipping it as existing. Kept if it moved off the base.
+unmake() {
+  [ "$(git rev-parse -q --verify "refs/heads/$1")" = "$BASE_SHA" ] || return 0
+  [ -z "$(worktree_of "$1")" ] && git branch -D "$1" >/dev/null 2>&1 || true
+}
+
+# Whether Herdr's worktree dialog (or worktree-request, which opens it) is up. When status
+# can't be read, assume it is, so only a dialog seen closed counts.
+dialog_open() {
+  local status
+  status=$(herdr-app status 2>/dev/null) || return 0
+  printf '%s' "$status" | jq -e 'any(.overlays[]?; . == "worktree-request" or . == "my-worktree")' >/dev/null
+}
+
+# Whether a branch's `git worktree add` is still running: git locks the checkout with the
+# reason "initializing" until it's done.
+initializing() {
+  git worktree list --porcelain | awk -v ref="branch refs/heads/$1" '
+    /^worktree / { hit = 0 }
+    $0 == ref { hit = 1 }
+    hit && $0 == "locked initializing" { found = 1 }
+    END { exit !found }'
 }
 
 PLAN_REL=$(rel "$PLAN_ABS")
@@ -222,7 +259,7 @@ for SC in "${SIDECARS[@]}"; do
     [ -z "$EFFORT" ] || ARGV+=(--effort "$EFFORT")
     ARGV+=(-n "$BRANCH")
     if ! WT_PATH=$(herdr_spawn "$BRANCH" "$PROMPT_FILE" "${ARGV[@]}"); then
-      printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "FAILED" "no checkout appeared; see Herdr's worktree dialog"
+      printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "FAILED" "$WT_PATH"
       FAILED=1; continue
     fi
     printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SPAWNED" "$WT_PATH (worktree space, under the repo's space)"
