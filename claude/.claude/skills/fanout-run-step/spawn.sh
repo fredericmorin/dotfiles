@@ -5,7 +5,9 @@ usage() {
   cat >&2 <<'USAGE'
 usage: spawn.sh <plan.md> [--step N] [--only 1,3] [-B <base-ref>] [--fork] [--background] [--model <m>] [--effort <level>] [--dry-run]
 
-Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a fan-out plan.
+Spawn one worktree + Claude session per sidecar prompt of one step of a fan-out plan, in the
+app this runs in: Supacode (a worktree and tab per unit) or Herdr (a worktree space per unit,
+made by its worktree dialog so the project's setup runs).
   plan.md       the plan file; sidecars are <plan-stem>_step<N>.md (single unit)
                 or <plan-stem>_step<N>_part<M>.md (one part of a parallel group) next to it
   --step        step number to spawn (default: the lowest step with a sidecar whose branch
@@ -14,7 +16,8 @@ Spawn one Supacode worktree + Claude session per sidecar prompt of one step of a
   -B, --base    base ref for the worktrees (default: current HEAD; for step > 1 pass the
                 ref that already contains the previous step, e.g. origin/master)
   --fork        fork the current Claude session into each worktree instead of a fresh one
-  --background  create worktrees/tabs without stealing focus
+  --background  create worktrees/tabs without stealing focus (Supacode only; Herdr shows
+                each new worktree space)
   --model       model for the spawned sessions (passed as claude --model, e.g. opus)
   --effort      effort level for the spawned sessions (passed as claude --effort, e.g. medium)
   --dry-run     print what would be spawned and exit
@@ -40,15 +43,31 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || usage
 
+# Which app this runs in: a Herdr terminal carries the herdr.space label, a Supacode one
+# has SUPACODE_REPO_ID.
+APP="" HERDR_SPACE=""
+if [ -n "${HC_TERMINAL_ID:-}" ] && command -v hc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  HERDR_SPACE=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null | jq -r '.labels["herdr.space"] // empty' 2>/dev/null || true)
+  [ -z "$HERDR_SPACE" ] || APP=herdr
+fi
+[ -n "$APP" ] || [ -z "${SUPACODE_REPO_ID:-}" ] || APP=supacode
+
 if [ "$DRY" -eq 0 ]; then
-  command -v supacode >/dev/null 2>&1 || {
-    echo "error: supacode CLI not found; run this inside a Supacode terminal" >&2
-    exit 1
-  }
-  [ -n "${SUPACODE_REPO_ID:-}" ] || {
-    echo "error: SUPACODE_REPO_ID is unset; run this inside a Supacode terminal" >&2
-    exit 1
-  }
+  case "$APP" in
+    herdr)
+      command -v herdr-app >/dev/null 2>&1 || { echo "error: herdr-app not found on PATH" >&2; exit 1; }
+      ;;
+    supacode)
+      command -v supacode >/dev/null 2>&1 || {
+        echo "error: supacode CLI not found; run this inside a Supacode terminal" >&2
+        exit 1
+      }
+      ;;
+    *)
+      echo "error: run this inside a Herdr or Supacode terminal (no herdr.space label, no SUPACODE_REPO_ID)" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 # The session's cwd is authoritative: SUPACODE_WORKTREE_ID is set when the tab
@@ -89,6 +108,33 @@ branch_of() {
   [ -n "$b" ] || b="${STEM}_step$(step_of "$1")$(part_of "$1" | sed 's/^./_part&/')"
   echo "$b"
 }
+# The checkout of a branch, if one exists.
+worktree_of() {
+  git worktree list --porcelain | awk -v ref="branch refs/heads/$1" '
+    /^worktree / { path = substr($0, 10) }
+    $0 == ref { print path; exit }'
+}
+
+# Herdr: opens its worktree dialog with props through the worktree-request mod, then waits
+# for the checkout. The dialog has no base ref, so the branch is made at the base first and
+# the dialog checks it out. Prints the checkout's path.
+herdr_spawn() {
+  local branch="$1" prompt_file="$2"; shift 2
+  local request="$HOME/.cache/herdr/worktree-request.json" argv path=""
+  git branch "$branch" "$BASE_SHA" >/dev/null || return 1
+  argv=$(printf '%s\0' "$@" -- "$(cat "$prompt_file")" | jq -Rs 'split("\u0000")[:-1]')
+  mkdir -p "$(dirname "$request")"
+  jq -n --arg space "$HERDR_SPACE" --arg folder "$REPO_ROOT" --arg branch "$branch" --argjson argv "$argv" \
+    '{created: (now * 1000 | floor), space: $space, folder: $folder, branch: $branch, argv: $argv}' > "$request"
+  herdr-app do mod.open --name worktree-request >/dev/null || return 1
+  # git worktree add can take a while on a big repo; the dialog shows any error.
+  for _ in $(seq 300); do
+    path=$(worktree_of "$branch")
+    [ -z "$path" ] || { echo "$path"; return 0; }
+    sleep 1
+  done
+  return 1
+}
 
 PLAN_REL=$(rel "$PLAN_ABS")
 PROMPT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/fanout-run-step/$STEM"
@@ -113,6 +159,7 @@ wanted() {
   case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
 
+echo "app: ${APP:-none}"
 echo "step: $STEP"
 printf '%-6s %-6s %-40s %-12s %s\n' STEP PART BRANCH ACTION SIDECAR
 FAILED=0 SEEN=0
@@ -165,6 +212,20 @@ for SC in "${SIDECARS[@]}"; do
 
   if [ "$DRY" -eq 1 ]; then
     printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "DRY-RUN" "$SC"
+    continue
+  fi
+
+  if [ "$APP" = herdr ]; then
+    ARGV=(claude)
+    [ "$FORK" -eq 0 ] || ARGV+=(--resume "$SID" --fork-session)
+    [ -z "$MODEL" ] || ARGV+=(--model "$MODEL")
+    [ -z "$EFFORT" ] || ARGV+=(--effort "$EFFORT")
+    ARGV+=(-n "$BRANCH")
+    if ! WT_PATH=$(herdr_spawn "$BRANCH" "$PROMPT_FILE" "${ARGV[@]}"); then
+      printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "FAILED" "no checkout appeared; see Herdr's worktree dialog"
+      FAILED=1; continue
+    fi
+    printf '%-6s %-6s %-40s %-12s %s\n' "$S" "${P:--}" "$BRANCH" "SPAWNED" "$WT_PATH (worktree space, under the repo's space)"
     continue
   fi
 
