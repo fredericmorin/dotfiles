@@ -5,6 +5,11 @@
     ],
     "deny": ["Artifact", "Workflow", "ReportFindings", "SendFeedback"]
   },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "enableArtifact": false,
   "skillOverrides": {
     "dataviz": "off",
     "code-review": "off",
