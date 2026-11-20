@@ -98,11 +98,20 @@ tmp/<title>_step3.md           code step: sidecar
 
 Numbering starts at 1, unpadded. Parts are numbered within their step across all kinds.
 
+Each code unit's branch is `<prefix>_step<N>[_part<M>]`. `<prefix>` is the branch of the
+session writing the plan (`git branch --show-current`), never one derived from the plan's
+title, so every unit's branch and worktree is named after the one the plan came from. When
+that branch is a poor prefix (`master`, a detached HEAD, a `claude/…` scratch name, a name
+for unrelated work), propose a new prefix in the plan, for the user to accept along with
+the plan.
+
 ## The plan file
 
 Standard plan prose, plus:
 
 - Where things stand: what already landed, evidence of what is left, linked prior plans or docs.
+- The branch prefix (see Layout): the session's branch, or the proposed replacement and
+  why the session's branch does not fit.
 - A step table in order of execution, one row per unit: step, part, kind, who carries it
   out, artifact (sidecar link, script link, or the exact command), scope, done when, size,
   difficulty.
@@ -140,7 +149,8 @@ Branch: `<prefix>_step2_part1`
 <paste target>
 ```
 
-A single-unit step uses `# Step 3 — <what it covers>` and branch `<prefix>_step3`.
+A single-unit step uses `# Step 3 — <what it covers>` and branch `<prefix>_step3`, with
+`<prefix>` the plan's branch prefix.
 
 The prompt must stand alone. Cover:
 
@@ -179,6 +189,6 @@ Check the shape first, with or without sidecars:
 - Every command unit has a command ready to paste or a script file, and no `.md` file.
 
 Then check that sidecar and script links resolve, and reread one sidecar as a stranger.
-Report the file list, the step table, the per-step launch lines, and the commands the
-user runs. Each launch line starts one worktree and session per sidecar of that step,
-once the user has reviewed it.
+Report the file list, the step table, the branch prefix (say so when it is a proposed
+replacement), the per-step launch lines, and the commands the user runs. Each launch line
+starts one worktree and session per sidecar of that step, once the user has reviewed it.
