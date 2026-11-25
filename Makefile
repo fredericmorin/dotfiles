@@ -24,7 +24,7 @@ install:
 ifeq ($(CLAUDE_PERSONAL_DIR),)
 	stow -v $(CLAUDE_IGNORES) claude
 else
-	stow -v $(CLAUDE_IGNORES) --ignore='settings\.json' claude
+	stow -v $(CLAUDE_IGNORES) --ignore='settings\.json' --ignore='commit-and-open-mr' claude
 	stow -v --no-folding $(STOW_IGNORES) --ignore='\.claude' -d claude -t ${CLAUDE_PERSONAL_DIR} .claude
 endif
 
